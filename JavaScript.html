@@ -1,0 +1,2312 @@
+<script>
+  let masterData = {}, memberRecords = [], photoData = {}, rawStats = [], meetingRecords = [], localScreeningData = {};
+  let kpiChartInstance = null, yoyChartInstance = null, qoqChartInstance = null;
+  let demoOccChart = null, demoEduChart = null, demoAgeChart = null;
+  let plannerModalObj = null, draftModalObj = null, memberEditModalObj = null, memberMergeModalObj = null;
+  let addMeetingModalObj = null, meetingReportModalObj = null, screeningModalObj = null;
+  let appReady = { master: false, members: false };
+  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+  let stopAutoSave = false, isRestoring = false;
+  const LS_WORKING = 'nadi_working_state';
+  const LS_ACTIVE = 'nadi_active_draft';
+  const LS_THEME = 'nadi_theme';
+  let activeDraftId = '';
+  let loadedDraftFromDrive = false;
+
+  function formatLocalDateInput(dateObj) {
+    if (!dateObj) return '';
+    const d = new Date(dateObj);
+    const year = d.getFullYear();
+    const month = ('0' + (d.getMonth() + 1)).slice(-2);
+    const day = ('0' + d.getDate()).slice(-2);
+    return `${year}-${month}-${day}`;
+  }
+
+  function sanitizeId(str) { return String(str).replace(/[^a-zA-Z0-9]/g, '-').toLowerCase(); }
+  function jsStr(str) { return String(str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+  function normalizeName_(value) {
+    return String(value || '').toUpperCase().trim().replace(/\s+/g, ' ');
+  }
+
+  function populateDatalists() {
+    const memList = document.getElementById('memberList');
+    const ethList = document.getElementById('ethnicList');
+    if (memList) {
+      memList.innerHTML = '';
+      memberRecords.forEach(m => memList.appendChild(new Option(m.name, m.name)));
+    }
+    if (ethList) {
+      ethList.innerHTML = '';
+      const ethnics = [...new Set(memberRecords.map(m => m.ethnic).filter(e => e))].sort();
+      ethnics.forEach(e => ethList.appendChild(new Option(e, e)));
+    }
+  }
+  function showSkeleton(containerId, count = 3) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '<div class="row g-3">' + '<div class="col-md-6 col-lg-4"><div class="skeleton skeleton-card"></div></div>'.repeat(count) + '</div>';
+  }
+  function escapeHtml(str) {
+    if(!str) return '';
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+
+  function showToast(msg, type = 'info') {
+    const toast = document.createElement('div');
+    const colors = {
+      success: '#10b981',
+      danger: '#ef4444',
+      warning: '#f59e0b',
+      info: '#3b82f6'
+    };
+    const icon = {
+      success: 'fa-circle-check',
+      danger: 'fa-circle-xmark',
+      warning: 'fa-triangle-exclamation',
+      info: 'fa-circle-info'
+    };
+
+    toast.innerHTML = `<i class="fa-solid ${icon[type]} me-2"></i>${msg}`;
+    toast.style.cssText = `position:fixed;bottom:20px;right:20px;background:${colors[type]};color:white;padding:12px 24px;border-radius:12px;font-weight:600;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);z-index:99999;transition:all 0.4s ease;transform:translateY(100px);opacity:0;`;
+    document.body.appendChild(toast);
+
+    // Animate in
+    setTimeout(() => {
+      toast.style.transform = 'translateY(0)';
+      toast.style.opacity = '1';
+    }, 100);
+
+    // Animate out
+    setTimeout(() => {
+      toast.style.transform = 'translateY(100px)';
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 400);
+    }, 4000);
+  }
+
+  function handleApiError(err) {
+    console.error('API Error:', err);
+    document.getElementById('overlay').style.display = 'none';
+    const msg = (err && err.message) ? err.message : 'An unexpected error occurred. Please try again.';
+    showToast(msg, 'danger');
+
+    // Re-enable any disabled buttons that might have been stuck
+    document.querySelectorAll('button:disabled').forEach(btn => {
+      if (btn.innerHTML.includes('fa-spinner')) {
+         btn.disabled = false;
+         btn.innerHTML = btn.getAttribute('data-orig-text') || 'Retry';
+      }
+    });
+  }
+
+  function parseDateSafe(dateStr) {
+    if(!dateStr) return new Date(0);
+    const parts = String(dateStr).split('-');
+    if(parts.length === 3) {
+      if(parts[0].length === 2 && parts[2].length === 4) return new Date(parts[2], parseInt(parts[1], 10)-1, parts[0]);
+      if(parts[0].length === 4) return new Date(parts[0], parseInt(parts[1], 10)-1, parts[2]);
+    }
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? new Date(0) : d;
+  }
+
+  function formatAMPM(timeStr) {
+    if(!timeStr) return '';
+    if(timeStr.toUpperCase().includes('AM') || timeStr.toUpperCase().includes('PM')) return timeStr;
+    let [h, m] = timeStr.split(':');
+    if(!h || !m) return timeStr;
+    let hours = parseInt(h, 10);
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    return `${hours}:${m} ${ampm}`;
+  }
+
+  function formatMobile(inp) {
+    let v = inp.value.replace(/\D/g, '');
+    if (v.length > 3) {
+      v = v.substring(0,3) + '-' + v.substring(3, 11);
+    }
+    inp.value = v;
+    persistWorkingState(false);
+  }
+
+  // --- Theme Management ---
+  function toggleTheme() {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    setTheme(newTheme);
+  }
+
+  function setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem(LS_THEME, theme);
+    const icon = document.getElementById('theme-icon');
+    const iconMob = document.getElementById('theme-icon-mob');
+    const themeClass = theme === 'dark' ? 'fa-solid fa-sun' : 'fa-solid fa-moon';
+    if (icon) icon.className = themeClass;
+    if (iconMob) iconMob.className = themeClass;
+    // Update charts if they exist
+    if (kpiChartInstance) drawStats();
+  }
+
+  function initTheme() {
+    const savedTheme = localStorage.getItem(LS_THEME) || 'light';
+    setTheme(savedTheme);
+  }
+
+  // --- Navigation & Views ---
+  const MOB_TAB_MAP = {
+    reg: 'prog', plan: 'prog', drafts: 'prog',
+    dash: 'dash', rep: 'rep', meet: 'meet', mem: 'mem'
+  };
+
+  function syncMobileNav(tab) {
+    const active = MOB_TAB_MAP[tab] || tab;
+    document.querySelectorAll('.mob-nav-item').forEach(el => el.classList.remove('active'));
+    const target = document.getElementById('mobt-' + active);
+    if (target) target.classList.add('active');
+  }
+
+  function mobileNavProgram() {
+    const progTabs = ['reg', 'plan', 'drafts'];
+    const currentActive = document.querySelector('.view-section:not(.hidden)');
+    const currentId = currentActive ? currentActive.id.replace('v-', '') : '';
+    if (!progTabs.includes(currentId)) {
+      toggle('reg');
+      return;
+    }
+    document.getElementById('prog-sheet').classList.remove('d-none');
+    document.getElementById('prog-sheet-backdrop').classList.remove('d-none');
+  }
+
+  function closeProgSheet() {
+    document.getElementById('prog-sheet').classList.add('d-none');
+    document.getElementById('prog-sheet-backdrop').classList.add('d-none');
+  }
+
+  function toggle(tab) {
+    document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.nav-link').forEach(el => {
+      el.classList.remove('active');
+      el.removeAttribute('aria-current');
+    });
+
+    document.getElementById('v-' + tab).classList.remove('hidden');
+    const tabEl = document.getElementById('tab-' + tab);
+    if (tabEl) {
+      tabEl.classList.add('active');
+      tabEl.setAttribute('aria-current', 'page');
+    }
+
+    if (tab === 'plan') fetchPlannerData();
+    if (tab === 'dash' || tab === 'rep') fetchStats();
+    if (tab === 'drafts') renderDraftList();
+    if (tab === 'mem') renderMemberList();
+    if (tab === 'meet') fetchMeetingData();
+
+    syncMobileNav(tab);
+    window.scrollTo(0,0);
+  }
+
+  // --- Draft Management ---
+  function showDraftModal() {
+    const pNameInput = document.querySelector('#prog-container .p-name');
+    let defaultName = `Draft ${new Date().toLocaleDateString()}`;
+    if (pNameInput && pNameInput.value.trim()) defaultName = `Draft - ${pNameInput.value.trim()}`;
+    document.getElementById('draft-name-input').value = defaultName;
+    if (!draftModalObj) draftModalObj = new bootstrap.Modal(document.getElementById('draftSaveModal'));
+    draftModalObj.show();
+    setTimeout(() => document.getElementById('draft-name-input').focus(), 500);
+  }
+
+  function confirmSaveDraft() {
+    const dName = document.getElementById('draft-name-input').value.trim();
+    const state = captureState();
+
+    const btn = document.querySelector('#draftSaveModal .btn-primary');
+    const origText = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Saving...';
+    btn.disabled = true;
+
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      btn.innerHTML = origText;
+      btn.disabled = false;
+      if (draftModalObj) draftModalObj.hide();
+      if (res && res.status === 'SUCCESS') {
+        activeDraftId = res.id;
+        loadedDraftFromDrive = true;
+        localStorage.setItem(LS_ACTIVE, JSON.stringify({ id: res.id, name: res.name }));
+        updateActiveDraftBadge();
+        showDraftSavedBadge('Saved to Cloud');
+      } else {
+        showToast("Failed to save draft to cloud.", 'danger');
+      }
+    }).saveDraftToDrive(dName, state, activeDraftId);
+  }
+
+  function showDraftSavedBadge(msg) {
+    showToast(msg, 'success');
+  }
+
+  function updateActiveDraftBadge() {
+    const badge = document.getElementById('nav-draft-badge');
+    const badgeMob = document.getElementById('nav-draft-badge-mob');
+    const badgeSheet = document.getElementById('nav-draft-badge-sheet');
+    const banner = document.getElementById('active-draft-banner');
+    const ls = localStorage.getItem(LS_ACTIVE);
+    if (ls || activeDraftId) {
+      if (badge) badge.classList.remove('d-none');
+      if (badgeMob) badgeMob.classList.remove('d-none');
+      if (badgeSheet) badgeSheet.classList.remove('d-none');
+      if (banner) {
+        banner.style.setProperty('display', 'flex', 'important');
+        const act = ls ? JSON.parse(ls) : { name: 'Active Session', id: activeDraftId };
+        document.getElementById('draft-banner-name').innerText = act.name;
+        // Search for this draft in the list to get meta
+        google.script.run.withFailureHandler(()=>{}).withSuccessHandler(list => {
+          const d = list.find(x => x.id === act.id);
+          if (d) document.getElementById('draft-banner-meta').innerText = `Last saved: ${new Date(d.updatedAt).toLocaleString()}`;
+        }).listDraftsFromDrive();
+      }
+    } else {
+      if (badge) badge.classList.add('d-none');
+      if (badgeMob) badgeMob.classList.add('d-none');
+      if (badgeSheet) badgeSheet.classList.add('d-none');
+      if (banner) banner.style.setProperty('display', 'none', 'important');
+    }
+  }
+
+  function captureState() {
+    const state = { prog: [], plan: [], members: [], photoData: photoData, localScreeningData: localScreeningData };
+    document.querySelectorAll('#prog-container .nadi-card').forEach(c => {
+      state.prog.push({
+        id: c.id,
+        name: c.querySelector('.p-name').value, date: c.querySelector('.p-date').value, time: c.querySelector('.p-time').value,
+        pillar: c.querySelector('.p-pillar').value, mod: c.querySelector('.p-mod').value, sub: c.querySelector('.p-sub').value
+      });
+    });
+    document.querySelectorAll('#plan-container .nadi-card').forEach(c => {
+      state.plan.push({
+        id: c.id,
+        name: c.querySelector('.p-name').value, date: c.querySelector('.p-date').value, time: c.querySelector('.p-time').value,
+        pillar: c.querySelector('.p-pillar').value, mod: c.querySelector('.p-mod').value, sub: c.querySelector('.p-sub').value,
+        remarks: c.querySelector('.p-remarks').value,
+        link: c.querySelector('.p-link').value
+      });
+    });
+    document.querySelectorAll('#part-container .nadi-card').forEach(c => {
+      const mem = { id: c.id, name: c.querySelector('.p-name-in').value, mode: 'verify', data: {} };
+      const nb = c.querySelector('div[id^="nb-"]:not(.hidden)');
+      const ub = c.querySelector('div[id^="ub-"]:not(.hidden)');
+      if (nb) {
+        mem.mode = 'new';
+        mem.data = {
+          ic: nb.querySelector('.n-ic').value, ph: nb.querySelector('.n-ph').value, em: nb.querySelector('.n-em').value,
+          race: nb.querySelector('.n-race').value, ethnic: nb.querySelector('.n-ethnic').value, occ: nb.querySelector('.n-occ').value,
+          sal: nb.querySelector('.n-sal').value, edu: nb.querySelector('.n-edu').value, dist: nb.querySelector('.n-dist').value,
+          join: nb.querySelector('.n-join').value, age: nb.querySelector('.n-age').value, dob: nb.querySelector('.n-dob').value
+        };
+      } else if (ub) {
+        mem.mode = 'update';
+        mem.data = { row: ub.querySelector('.row-id').value, ic: ub.querySelector('.ic-upd').value };
+      }
+      state.members.push(mem);
+    });
+    return state;
+  }
+
+  function persistWorkingState(forceAlert = false) {
+    if (stopAutoSave) return;
+    const state = captureState();
+    localStorage.setItem(LS_WORKING, JSON.stringify(state));
+    if (forceAlert) console.log("Local state saved");
+  }
+
+  function loadWorkingState() {
+    const str = localStorage.getItem(LS_WORKING);
+    if (str) {
+      try {
+        const state = JSON.parse(str);
+        restoreState(state);
+        const activeStr = localStorage.getItem(LS_ACTIVE);
+        if (activeStr) {
+          const act = JSON.parse(activeStr);
+          activeDraftId = act.id;
+          loadedDraftFromDrive = true;
+        }
+        return;
+      } catch (e) { console.error(e); }
+    }
+    isRestoring = false;
+    if(document.getElementById('prog-container').children.length === 0) addProg('prog-container', true);
+    if(document.getElementById('part-container').children.length === 0) addPart();
+  }
+
+  function restoreState(state) {
+    isRestoring = true;
+    document.getElementById('prog-container').innerHTML = '';
+    document.getElementById('plan-container').innerHTML = '';
+    document.getElementById('part-container').innerHTML = '';
+    photoData = state.photoData || {};
+    localScreeningData = state.localScreeningData || {};
+
+    (state.prog || []).forEach(p => {
+      addProg('prog-container', true, p.id);
+      const c = document.getElementById(p.id);
+      if(c) {
+        c.querySelector('.p-name').value = p.name; c.querySelector('.p-date').value = p.date; c.querySelector('.p-time').value = p.time;
+        const pSel = c.querySelector('.p-pillar'); pSel.value = p.pillar; updM(pSel);
+        const mSel = c.querySelector('.p-mod'); mSel.value = p.mod; updS(mSel);
+        c.querySelector('.p-sub').value = p.sub;
+        c.querySelector('.acc-title').innerText = p.name || 'Untitled Program';
+        renderImgs(p.id);
+      }
+    });
+    (state.plan || []).forEach(p => {
+      addProg('plan-container', false, p.id);
+      const c = document.getElementById(p.id);
+      if(c) {
+        c.querySelector('.p-name').value = p.name; c.querySelector('.p-date').value = p.date; c.querySelector('.p-time').value = p.time;
+        const pSel = c.querySelector('.p-pillar'); pSel.value = p.pillar; updM(pSel);
+        const mSel = c.querySelector('.p-mod'); mSel.value = p.mod; updS(mSel);
+        c.querySelector('.p-sub').value = p.sub;
+        c.querySelector('.acc-title').innerText = p.name || 'Untitled Plan';
+        c.querySelector('.p-remarks').value = p.remarks || '';
+        c.querySelector('.p-link').value = p.link || '';
+      }
+    });
+    (state.members || []).forEach(m => {
+      addPart(m.id);
+      const c = document.getElementById(m.id);
+      if(c) {
+        c.querySelector('.p-name-in').value = m.name;
+        c.querySelector('.acc-title').innerText = m.name || 'Untitled Participant';
+        if(m.mode === 'new') {
+          audit(c.querySelector('.p-name-in'), true);
+          setTimeout(() => {
+            const nb = c.querySelector('div[id^="nb-"]');
+            if(nb && !nb.classList.contains('hidden')) {
+              nb.querySelector('.n-ic').value = m.data.ic || ''; nb.querySelector('.n-ph').value = m.data.ph || ''; nb.querySelector('.n-em').value = m.data.em || '';
+              nb.querySelector('.n-race').value = m.data.race || ''; nb.querySelector('.n-ethnic').value = m.data.ethnic || ''; nb.querySelector('.n-occ').value = m.data.occ || '';
+              nb.querySelector('.n-sal').value = m.data.sal || ''; nb.querySelector('.n-edu').value = m.data.edu || ''; nb.querySelector('.n-dist').value = m.data.dist || '';
+              nb.querySelector('.n-join').value = m.data.join || ''; nb.querySelector('.n-age').value = m.data.age || ''; nb.querySelector('.n-dob').value = m.data.dob || '';
+            }
+          }, 100);
+        } else if (m.mode === 'update') {
+          audit(c.querySelector('.p-name-in'));
+          setTimeout(() => {
+            const ub = c.querySelector('div[id^="ub-"]');
+            if(ub && !ub.classList.contains('hidden')) {
+              ub.querySelector('.ic-upd').value = m.data.ic || '';
+            }
+          }, 100);
+        }
+      }
+    });
+
+    isRestoring = false;
+    if(document.getElementById('prog-container').children.length === 0) addProg('prog-container', true);
+    if(document.getElementById('part-container').children.length === 0) addPart();
+  }
+
+  function renderDraftList() {
+    const containerId = 'draft-list-container';
+    showSkeleton(containerId);
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(list => {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      if (!list || list.length === 0) {
+        container.innerHTML = '<div class="text-center py-5 text-muted"><i class="fa-solid fa-cloud-sun fs-1 opacity-25 mb-3 d-block text-secondary"></i>No cloud drafts found.</div>';
+        return;
+      }
+      let html = '<div class="row g-3">';
+      list.forEach(d => {
+        const dDate = new Date(d.updatedAt);
+        const activeClass = (activeDraftId === d.id) ? 'border-primary border-2 shadow' : '';
+        const activeBadge = (activeDraftId === d.id) ? '<span class="badge bg-primary ms-2">Active Loaded</span>' : '';
+        html += `
+          <div class="col-md-6 col-lg-4">
+            <div class="nadi-card p-3 h-100 d-flex flex-column ${activeClass}" style="margin-bottom:0;">
+              <div class="d-flex justify-content-between align-items-start mb-2">
+                <div class="fw-bold text-dark fs-5 text-truncate" title="${escapeHtml(d.name)}">${escapeHtml(d.name)}${activeBadge}</div>
+              </div>
+              <div class="text-muted small mb-3"><i class="fa-regular fa-clock me-1"></i>${dDate.toLocaleString()}</div>
+              <div class="d-flex gap-2 mb-3 flex-wrap small">
+                <span class="badge bg-light text-dark border"><i class="fa-solid fa-check me-1 text-success"></i>${d.summary.completed} Prog</span>
+                <span class="badge bg-light text-dark border"><i class="fa-solid fa-users me-1 text-info"></i>${d.summary.members} Pax</span>
+                <span class="badge bg-light text-dark border"><i class="fa-regular fa-image me-1 text-warning"></i>${d.summary.photos} Pic</span>
+              </div>
+              <div class="mt-auto d-flex gap-2">
+                <button class="btn btn-sm btn-outline-primary flex-grow-1 fw-bold" onclick="actionLoadDraft('${jsStr(d.id)}')"><i class="fa-solid fa-download me-1"></i>Load</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="actionDeleteDraft('${jsStr(d.id)}', '${jsStr(d.name)}')"><i class="fa-solid fa-trash"></i></button>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+      html += '</div>';
+      container.innerHTML = html;
+    }).listDraftsFromDrive();
+  }
+
+  function actionLoadDraft(id) {
+    if(!confirm("Loading this draft will overwrite your current active screen. Continue?")) return;
+    document.getElementById('overlay').style.display = 'flex';
+    document.getElementById('overlay-text').innerText = 'Downloading Draft...';
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      document.getElementById('overlay').style.display = 'none';
+      if (res && res.status === 'SUCCESS') {
+        activeDraftId = res.id;
+        loadedDraftFromDrive = true;
+        localStorage.setItem(LS_ACTIVE, JSON.stringify({ id: res.id, name: res.name }));
+        updateActiveDraftBadge();
+        restoreState(res.state);
+        persistWorkingState(false);
+        toggle('reg');
+        showDraftSavedBadge('Draft Loaded');
+      } else {
+        showToast('Failed to load draft.');
+      }
+    }).loadDraftFromDrive(id);
+  }
+
+  function actionDeleteDraft(id, name) {
+    if(!confirm(`Permanently delete draft "${name}"?`)) return;
+    document.getElementById('overlay').style.display = 'flex';
+    document.getElementById('overlay-text').innerText = 'Deleting...';
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      document.getElementById('overlay').style.display = 'none';
+      if (activeDraftId === id) {
+        activeDraftId = '';
+        loadedDraftFromDrive = false;
+        localStorage.removeItem(LS_ACTIVE);
+        updateActiveDraftBadge();
+      }
+      renderDraftList();
+    }).deleteDraftFromDrive(id);
+  }
+
+  // --- Program Management ---
+  function initDragDrop(id) {
+    const dz = document.getElementById(`dz-${id}`);
+    if (!dz) return;
+
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evt => {
+      dz.addEventListener(evt, e => {
+        e.preventDefault();
+        e.stopPropagation();
+      }, false);
+    });
+
+    dz.addEventListener('dragover', () => dz.classList.add('dragover'));
+    dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+
+    dz.addEventListener('drop', (e) => {
+      dz.classList.remove('dragover');
+      const files = e.dataTransfer.files;
+      handleImg(files, id);
+    });
+  }
+
+  function toggleAccordion(header) {
+    const item = header.closest('.form-accordion-item');
+    const body = item.querySelector('.form-accordion-body');
+    const isOpening = !header.classList.contains('active');
+
+    // Accordion mode: close other items in the same container
+    if (isOpening) {
+      const container = item.parentElement;
+      container.querySelectorAll('.form-accordion-header').forEach(h => {
+        h.classList.remove('active');
+        h.closest('.form-accordion-item').querySelector('.form-accordion-body').classList.add('hidden');
+      });
+      header.classList.add('active');
+      body.classList.remove('hidden');
+    } else {
+      header.classList.remove('active');
+      body.classList.add('hidden');
+    }
+  }
+
+  function addProg(containerId, isCompleted, forceId = null) {
+    const id = forceId || 'prog-' + Date.now() + Math.floor(Math.random() * 1000);
+    const today = formatLocalDateInput(new Date());
+
+    const count = document.getElementById(containerId).children.length + 1;
+    const title = `${isCompleted ? 'Program' : 'Plan'} #${count}`;
+
+    const html = `
+      <div class="form-accordion-item nadi-card p-0 position-relative" id="${id}">
+        <button class="btn btn-sm btn-outline-danger position-absolute top-0 end-0 m-2 rounded-circle shadow-sm" style="width:28px;height:28px;padding:0;z-index:10;" onclick="this.closest('.form-accordion-item').remove(); delete localScreeningData['${id}']; persistWorkingState(false);" title="Remove"><i class="fa-solid fa-xmark"></i></button>
+        <div class="form-accordion-header active" onclick="toggleAccordion(this)">
+          <span><i class="fa-solid fa-layer-group me-2 opacity-75"></i> <span class="acc-title">${title}</span></span>
+          <i class="fa-solid fa-chevron-down chevron"></i>
+        </div>
+        <div class="form-accordion-body">
+          <div class="row g-3">
+            <div class="col-md-6"><label class="form-label fw-bold small text-muted text-uppercase">Program Name</label><input type="text" class="form-control p-name" placeholder="e.g. BENGKEL ICT" oninput="this.value = this.value.toUpperCase(); this.closest('.form-accordion-item').querySelector('.acc-title').innerText = this.value || '${title}'"></div>
+            <div class="col-md-3"><label class="form-label fw-bold small text-muted text-uppercase">Date</label><input type="date" class="form-control p-date" value="${today}"></div>
+            <div class="col-md-3"><label class="form-label fw-bold small text-muted text-uppercase">Time</label><input type="time" class="form-control p-time"></div>
+            <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Pillar</label><select class="form-select p-pillar" onchange="updM(this)"><option value="">Select Pillar</option></select></div>
+            <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Module</label><select class="form-select p-mod" onchange="updS(this)" disabled><option value="">Select Module</option></select></div>
+            <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Sub-Module</label><select class="form-select p-sub" disabled><option value="">Select Sub-Module</option></select></div>
+            ${!isCompleted ? `
+            <div class="col-md-6"><label class="form-label fw-bold small text-muted text-uppercase">Remarks (Optional)</label><input type="text" class="form-control p-remarks" placeholder="Notes for planner"></div>
+            <div class="col-md-6"><label class="form-label fw-bold small text-muted text-uppercase">Meeting Link (Optional)</label><input type="url" class="form-control p-link" placeholder="Zoom/Meet Link"></div>
+            <input type="hidden" class="p-old-key">
+            ` : ''}
+            ${isCompleted ? `
+            <div class="col-12 mt-4 pt-3 border-top border-light">
+              <label class="form-label fw-bold small text-muted text-uppercase mb-2"><i class="fa-solid fa-camera text-accent me-2"></i>Evidence Photos (Max 5)</label>
+
+              <div class="drop-zone" id="dz-${id}" onclick="document.getElementById('fi-${id}').click()">
+                <i class="fa-solid fa-cloud-arrow-up fa-3x mb-2"></i>
+                <p class="fw-bold text-dark mb-1">Click to browse or drag and drop photos here</p>
+                <p class="small text-muted m-0">PNG, JPG up to 5 images</p>
+                <input type="file" id="fi-${id}" class="drop-zone-input" accept="image/*" multiple onchange="handleImg(this.files, '${id}')">
+              </div>
+
+              <div class="photo-preview" id="pv-${id}"></div>
+            </div>` : ''}
+          </div>
+        </div>
+      </div>`;
+
+    // Close other items
+    document.querySelectorAll(`#${containerId} .form-accordion-header`).forEach(h => {
+       h.classList.remove('active');
+       h.closest('.form-accordion-item').querySelector('.form-accordion-body').classList.add('hidden');
+    });
+
+    document.getElementById(containerId).insertAdjacentHTML('beforeend', html);
+    const pSel = document.getElementById(id).querySelector('.p-pillar');
+    Object.keys(masterData).forEach(k => pSel.add(new Option(k, k)));
+
+    if (isCompleted) {
+      initDragDrop(id);
+    }
+
+    persistWorkingState(false);
+  }
+
+  function updM(sel) {
+    const row = sel.closest('.nadi-card');
+    const mod = row.querySelector('.p-mod');
+    const sub = row.querySelector('.p-sub');
+    mod.innerHTML = '<option value="">Select Module</option>';
+    sub.innerHTML = '<option value="">Select Sub-Module</option>';
+    sub.disabled = true;
+    if(sel.value) {
+      Object.keys(masterData[sel.value]).forEach(k => mod.add(new Option(k, k)));
+      mod.disabled = false;
+    } else { mod.disabled = true; }
+    persistWorkingState(false);
+  }
+
+  function updS(sel) {
+    const row = sel.closest('.nadi-card');
+    const pillar = row.querySelector('.p-pillar').value;
+    const sub = row.querySelector('.p-sub');
+    sub.innerHTML = '<option value="">Select Sub-Module</option>';
+    if(sel.value && masterData[pillar][sel.value]) {
+      masterData[pillar][sel.value].forEach(k => sub.add(new Option(k, k)));
+      sub.disabled = false;
+    } else { sub.disabled = true; }
+    persistWorkingState(false);
+  }
+
+  // --- Member Management (Deep) ---
+  function renderMemberList() {
+    const container = document.getElementById('member-list-container');
+    showSkeleton('member-list-container');
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      memberRecords = res || [];
+      populateDatalists();
+      filterMembers();
+    }).getMemberData();
+  }
+
+  function filterMembers() {
+    const q = document.getElementById('mem-search').value.toUpperCase();
+    const container = document.getElementById('member-list-container');
+    const filtered = memberRecords.filter(m => m.name.includes(q) || m.ic.includes(q));
+
+    if (filtered.length === 0) {
+      container.innerHTML = '<div class="text-center py-5 text-muted"><i class="fa-solid fa-user-slash fs-1 mb-3 opacity-25 d-block"></i>No members found matching your search.</div>';
+      return;
+    }
+
+    container.innerHTML = filtered.map(m => {
+      const isComplete = m.occupation && m.education && m.age;
+      const statusDot = isComplete ? '' : '<i class="fa-solid fa-circle text-secondary opacity-25 ms-2" style="font-size: 0.5rem;" title="Incomplete Profile"></i>';
+      return `
+      <div class="col-md-6 col-xl-4">
+        <div class="nadi-card h-100 p-3 mb-0 d-flex flex-column">
+          <div class="d-flex justify-content-between align-items-start mb-2">
+            <div class="fw-bold text-dark fs-5 text-truncate" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}${statusDot}</div>
+            <button class="btn btn-sm btn-outline-primary" onclick="showEditMemberModal(${m.row})"><i class="fa-solid fa-pen-to-square"></i></button>
+          </div>
+          <div class="small text-muted mb-3 font-monospace"><i class="fa-regular fa-id-card me-1"></i>${escapeHtml(m.ic)}</div>
+          <div class="small mb-1"><i class="fa-solid fa-phone me-2 text-primary opacity-50"></i>${escapeHtml(m.mobile || 'N/A')}</div>
+          <div class="small mb-3 text-truncate"><i class="fa-solid fa-envelope me-2 text-primary opacity-50"></i>${escapeHtml(m.email || 'N/A')}</div>
+          <div class="mt-auto pt-2 border-top d-flex justify-content-between align-items-center">
+            <span class="badge bg-light text-dark border small">${escapeHtml(m.occupation || 'N/A')}</span>
+            <span class="small text-muted">Joined: ${m.dateJoin}</span>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function loadMemberHistory(name) {
+    const box = document.getElementById('member-history-body');
+    box.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-muted"><i class="fa-solid fa-spinner fa-spin me-2"></i>Loading...</td></tr>';
+
+    // Filter rawStats for this member (max 100)
+    const history = rawStats.filter(s => s.status === 'COMPLETED' && normalizeName_(s.partName) === normalizeName_(name))
+      .sort((a, b) => parseDateSafe(b.date) - parseDateSafe(a.date))
+      .slice(0, 100);
+
+    renderMemberHistory(history);
+  }
+
+  function renderMemberHistory(history) {
+    const box = document.getElementById('member-history-body');
+    if (!history || history.length === 0) {
+      box.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-muted">No attendance records found.</td></tr>';
+      return;
+    }
+    box.innerHTML = history.map(h => `
+      <tr>
+        <td>${escapeHtml(h.date)}</td>
+        <td class="fw-bold">${escapeHtml(h.progName)}</td>
+        <td><span class="badge bg-light text-dark border">${escapeHtml(h.pillar)}</span></td>
+      </tr>
+    `).join('');
+  }
+
+  function showEditMemberModal(row) {
+    const m = memberRecords.find(x => x.row === row);
+    if (!m) return;
+    loadMemberHistory(m.name);
+    document.getElementById('edit-mem-row').value = m.row;
+    document.getElementById('edit-mem-name').value = m.name;
+    document.getElementById('edit-mem-ic').value = m.ic;
+    document.getElementById('edit-mem-ph').value = m.mobile;
+    document.getElementById('edit-mem-em').value = m.email;
+    document.getElementById('edit-mem-race').value = m.race;
+    document.getElementById('edit-mem-ethnic').value = m.ethnic;
+    document.getElementById('edit-mem-occ').value = m.occupation;
+    document.getElementById('edit-mem-sal').value = m.salary;
+    document.getElementById('edit-mem-edu').value = m.education;
+    document.getElementById('edit-mem-dist').value = m.distance;
+    document.getElementById('edit-mem-join').value = m.dateJoin;
+    document.getElementById('edit-mem-age').value = m.age;
+    document.getElementById('edit-mem-dob').value = m.dob;
+
+    if (!memberEditModalObj) memberEditModalObj = new bootstrap.Modal(document.getElementById('memberEditModal'));
+    memberEditModalObj.show();
+  }
+
+  function saveMemberEdit() {
+    const row = document.getElementById('edit-mem-row').value;
+    const data = {
+      name: document.getElementById('edit-mem-name').value,
+      ic: document.getElementById('edit-mem-ic').value,
+      mobile: document.getElementById('edit-mem-ph').value,
+      email: document.getElementById('edit-mem-em').value,
+      race: document.getElementById('edit-mem-race').value,
+      ethnic: document.getElementById('edit-mem-ethnic').value,
+      occupation: document.getElementById('edit-mem-occ').value,
+      salary: document.getElementById('edit-mem-sal').value,
+      education: document.getElementById('edit-mem-edu').value,
+      distance: document.getElementById('edit-mem-dist').value,
+      dateJoin: document.getElementById('edit-mem-join').value,
+      age: document.getElementById('edit-mem-age').value,
+      dob: document.getElementById('edit-mem-dob').value
+    };
+
+    const btn = document.querySelector('#memberEditModal .btn-primary');
+    btn.setAttribute('data-orig-text', btn.innerHTML);
+    btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Saving...';
+
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      btn.disabled = false; btn.innerHTML = 'Save Changes';
+      if (res.status === 'SUCCESS') {
+        if (memberEditModalObj) memberEditModalObj.hide();
+        renderMemberList();
+        showDraftSavedBadge('Member Details Updated');
+      }
+    }).updateMemberDetail(row, data);
+  }
+
+  let mergeMasterRow = null;
+  let mergeDupRows = [];
+
+  function showMergeModal() {
+    mergeMasterRow = null; mergeDupRows = [];
+    showMergeStep(1);
+    document.getElementById('btn-compare-merge').disabled = true;
+    renderMergeLists();
+    if (!memberMergeModalObj) memberMergeModalObj = new bootstrap.Modal(document.getElementById('memberMergeModal'));
+    memberMergeModalObj.show();
+  }
+
+  function showMergeStep(step) {
+    if (step === 1) {
+      document.getElementById('merge-step-1').classList.remove('d-none');
+      document.getElementById('merge-step-2').classList.add('d-none');
+      document.getElementById('btn-compare-merge').classList.remove('d-none');
+      document.getElementById('btn-confirm-merge').classList.add('d-none');
+      document.getElementById('btn-merge-back').style.display = 'none';
+      document.getElementById('btn-merge-cancel').style.display = 'inline-block';
+    } else {
+      document.getElementById('merge-step-1').classList.add('d-none');
+      document.getElementById('merge-step-2').classList.remove('d-none');
+      document.getElementById('btn-compare-merge').classList.add('d-none');
+      document.getElementById('btn-confirm-merge').classList.remove('d-none');
+      document.getElementById('btn-merge-back').style.display = 'inline-block';
+      document.getElementById('btn-merge-cancel').style.display = 'none';
+    }
+  }
+
+  function renderMergeLists() {
+    const masterList = document.getElementById('merge-master-list');
+    const dupList = document.getElementById('merge-dup-list');
+
+    const html = memberRecords.map(m => `
+      <button type="button" class="list-group-item list-group-item-action p-2 small border-bottom" data-row="${m.row}" onclick="selectMergeItem(this)">
+        <div class="fw-bold">${escapeHtml(m.name)}</div>
+        <div class="text-muted small">${escapeHtml(m.ic)}</div>
+      </button>
+    `).join('');
+
+    masterList.innerHTML = html;
+    dupList.innerHTML = html;
+  }
+
+  function selectMergeItem(el) {
+    const row = el.getAttribute('data-row');
+    const isMasterList = el.closest('#merge-master-list');
+
+    if (isMasterList) {
+      el.closest('#merge-master-list').querySelectorAll('.list-group-item').forEach(x => x.classList.remove('active', 'bg-primary'));
+      el.classList.add('active', 'bg-primary');
+      mergeMasterRow = row;
+    } else {
+      if (el.classList.contains('active')) {
+        el.classList.remove('active', 'bg-danger');
+        mergeDupRows = mergeDupRows.filter(r => r !== row);
+      } else {
+        el.classList.add('active', 'bg-danger');
+        mergeDupRows.push(row);
+      }
+    }
+
+    document.getElementById('btn-compare-merge').disabled = !(mergeMasterRow && mergeDupRows.length > 0);
+  }
+
+  function prepareMergeComparison() {
+    if (mergeDupRows.includes(mergeMasterRow)) return showToast("Master record cannot be a duplicate.");
+
+    const master = memberRecords.find(m => m.row == mergeMasterRow);
+    const dups = memberRecords.filter(m => mergeDupRows.includes(String(m.row)));
+
+    const fields = [
+      { key: 'name', label: 'Full Name' },
+      { key: 'ic', label: 'IC / Passport' },
+      { key: 'mobile', label: 'Mobile' },
+      { key: 'email', label: 'Email' },
+      { key: 'race', label: 'Race' },
+      { key: 'ethnic', label: 'Ethnic' },
+      { key: 'occupation', label: 'Occupation' },
+      { key: 'salary', label: 'Salary' },
+      { key: 'education', label: 'Education' },
+      { key: 'distance', label: 'Distance' },
+      { key: 'dateJoin', label: 'Join Date' },
+      { key: 'age', label: 'Age' },
+      { key: 'dob', label: 'DOB' }
+    ];
+
+    let html = '<div class="table-responsive"><table class="table table-bordered table-sm align-middle">';
+    html += '<thead class="table-dark"><tr><th>Field</th><th>Master Value</th><th>Alternative Values</th></tr></thead><tbody>';
+
+    fields.forEach(f => {
+      const masterVal = master[f.key] || '';
+      const dupValues = [...new Set(dups.map(d => d[f.key] || '').filter(v => v !== masterVal && v !== ''))];
+
+      html += `<tr><td class="fw-bold small">${f.label}</td>`;
+      // Master option
+      html += `<td>
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="merge_${f.key}" id="master_${f.key}" value="${escapeHtml(masterVal)}" checked>
+          <label class="form-check-label small" for="master_${f.key}">${escapeHtml(masterVal) || '<i class="text-muted">Empty</i>'}</label>
+        </div>
+      </td>`;
+
+      // Duplicate options
+      html += `<td>`;
+      if (dupValues.length === 0) {
+        html += '<small class="text-muted">No alternatives</small>';
+      } else {
+        dupValues.forEach((v, i) => {
+          html += `
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="merge_${f.key}" id="dup_${f.key}_${i}" value="${escapeHtml(v)}">
+              <label class="form-check-label small" for="dup_${f.key}_${i}">${escapeHtml(v)}</label>
+            </div>`;
+        });
+      }
+      html += `</td></tr>`;
+    });
+
+    html += '</tbody></table></div>';
+    document.getElementById('merge-conflict-container').innerHTML = html;
+    showMergeStep(2);
+  }
+
+  function confirmMerge() {
+    const finalData = {};
+    const fields = ['name', 'ic', 'mobile', 'email', 'race', 'ethnic', 'occupation', 'salary', 'education', 'distance', 'dateJoin', 'age', 'dob'];
+
+    fields.forEach(f => {
+      const selected = document.querySelector(`input[name="merge_${f}"]:checked`);
+      finalData[f] = selected ? selected.value : '';
+    });
+
+    if (!confirm(`Are you sure you want to merge these ${mergeDupRows.length} duplicates? The Master record will be updated with your selections and duplicates will be PERMANENTLY deleted.`)) return;
+
+    const btn = document.getElementById('btn-confirm-merge');
+    btn.setAttribute('data-orig-text', btn.innerHTML);
+    btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Merging...';
+
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      btn.disabled = false; btn.innerHTML = 'Finalize Merge';
+      if (res.status === 'SUCCESS') {
+        if (memberMergeModalObj) memberMergeModalObj.hide();
+        renderMemberList();
+        showDraftSavedBadge(`Merged ${res.deletedCount} Records`);
+      }
+    }).mergeMembers(mergeMasterRow, mergeDupRows, finalData);
+  }
+
+  // --- Meeting Management ---
+  let meetingPhotos = [];
+
+  function fetchMeetingData() {
+    showSkeleton('meeting-list-container');
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      meetingRecords = res || [];
+      renderMeetingList();
+    }).getMeetings();
+  }
+
+  function renderMeetingList() {
+    const container = document.getElementById('meeting-list-container');
+    const monthFilter = document.getElementById('m-filter-month').value;
+
+    let filtered = meetingRecords.slice();
+
+    if (monthFilter !== '') {
+      const targetMonth = parseInt(monthFilter, 10);
+      filtered = filtered.filter(m => {
+        const d = parseDateSafe(m.date);
+        return d.getMonth() === targetMonth;
+      });
+    }
+
+    if (filtered.length === 0) {
+      container.innerHTML = `<div class="text-center py-5 text-muted"><i class="fa-solid fa-handshake-slash fs-1 mb-3 opacity-25 d-block"></i>No meetings found${monthFilter !== '' ? ' for this month' : ''}.</div>`;
+      return;
+    }
+
+    // Split into Upcoming and Completed
+    const upcoming = filtered.filter(m => m.status === 'UPCOMING');
+    const completed = filtered.filter(m => m.status === 'COMPLETED');
+
+    // Sort Upcoming: Nearest date/time first (A-Z)
+    upcoming.sort((a, b) => {
+      const dateDiff = parseDateSafe(a.date) - parseDateSafe(b.date);
+      if (dateDiff !== 0) return dateDiff;
+      return String(a.time).localeCompare(String(b.time));
+    });
+
+    // Sort Completed: Newest first (Z-A)
+    completed.sort((a, b) => {
+      const dateDiff = parseDateSafe(b.date) - parseDateSafe(a.date);
+      if (dateDiff !== 0) return dateDiff;
+      return String(b.time).localeCompare(String(a.time));
+    });
+
+    const allSorted = [...upcoming, ...completed];
+
+    container.innerHTML = allSorted.map(m => {
+      const isUpcoming = m.status === 'UPCOMING';
+      return `
+        <div class="nadi-card shadow-sm mb-4 border-start border-4 ${isUpcoming ? 'border-primary' : 'border-success'}">
+          <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+            <div class="flex-grow-1">
+              <div class="d-flex align-items-center mb-2">
+                <span class="badge ${isUpcoming ? 'bg-primary' : 'bg-success'} me-3">${m.status}</span>
+                <h3 class="h5 fw-bold m-0">${escapeHtml(m.title)}</h3>
+              </div>
+              <div class="text-muted small mb-3">
+                <span class="me-3"><i class="fa-regular fa-calendar me-1"></i>${m.date}</span>
+                <span class="me-3"><i class="fa-regular fa-clock me-1"></i>${formatAMPM(m.time)}</span>
+                ${m.link ? `<span><i class="fa-solid fa-link me-1"></i><a href="${m.link}" target="_blank" class="text-accent text-decoration-none">Meeting Link</a></span>` : ''}
+              </div>
+            </div>
+            <div class="text-end">
+              <div class="d-flex flex-column align-items-end gap-2">
+                <div class="d-flex gap-2">
+                  ${isUpcoming ?
+                    `<button class="btn btn-sm btn-success" onclick="showMeetingReportModal(${m.row})"><i class="fa-solid fa-clipboard-check me-1"></i>Report</button>` :
+                    `<span class="badge bg-light text-dark border p-2"><i class="fa-solid fa-users me-1 text-info"></i>${m.pax} Pax</span>`
+                  }
+                  <button class="btn btn-sm btn-outline-secondary" onclick="editMeetingAction(${m.row})"><i class="fa-solid fa-pen"></i></button>
+                  <button class="btn btn-sm btn-outline-danger" onclick="deleteMeetingAction(${m.row})"><i class="fa-solid fa-trash"></i></button>
+                  ${!isUpcoming && m.folderUrl ? `<a href="${m.folderUrl}" target="_blank" class="btn btn-sm btn-outline-dark"><i class="fa-solid fa-folder-open"></i></a>` : ''}
+                </div>
+                ${!isUpcoming && m.remarks ? `<div class="planner-remarks-box text-start" style="max-width:300px;"><i class="fa-solid fa-note-sticky me-2 opacity-50"></i>${escapeHtml(m.remarks)}</div>` : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function showAddMeetingModal() {
+    document.getElementById('meet-row').value = '';
+    document.getElementById('meet-modal-title').innerHTML = '<i class="fa-solid fa-calendar-plus me-2"></i>Schedule Meeting';
+    document.getElementById('meet-save-btn').innerText = 'Schedule';
+    document.getElementById('meet-extra-fields').classList.add('d-none');
+
+    const titleInput = document.getElementById('meet-title');
+    titleInput.value = '';
+    titleInput.oninput = function() { this.value = this.value.toUpperCase(); };
+    document.getElementById('meet-date').value = formatLocalDateInput(new Date());
+    document.getElementById('meet-time').value = '';
+    document.getElementById('meet-link').value = '';
+
+    if (!addMeetingModalObj) addMeetingModalObj = new bootstrap.Modal(document.getElementById('addMeetingModal'));
+    addMeetingModalObj.show();
+  }
+
+  function saveMeeting() {
+    const row = document.getElementById('meet-row').value;
+    const data = {
+      title: document.getElementById('meet-title').value,
+      date: document.getElementById('meet-date').value,
+      time: document.getElementById('meet-time').value,
+      link: document.getElementById('meet-link').value
+    };
+
+    if (row) {
+      data.pax = document.getElementById('meet-pax').value;
+      data.remarks = document.getElementById('meet-remarks').value;
+    }
+
+    if (!data.title || !data.date) return showToast("Title and Date are required.");
+
+    const btn = document.getElementById('meet-save-btn');
+    btn.setAttribute('data-orig-text', btn.innerHTML);
+    btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Saving...';
+
+    if (row) {
+      google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+        btn.disabled = false; btn.innerText = 'Save Changes';
+        if (res.status === 'SUCCESS') {
+          if (addMeetingModalObj) addMeetingModalObj.hide();
+          fetchMeetingData();
+          showDraftSavedBadge('Meeting Updated');
+        }
+      }).updateMeeting(row, data);
+    } else {
+      google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+        btn.disabled = false; btn.innerText = 'Schedule';
+        if (res.status === 'SUCCESS') {
+          if (addMeetingModalObj) addMeetingModalObj.hide();
+          fetchMeetingData();
+          showDraftSavedBadge('Meeting Scheduled');
+        }
+      }).saveMeeting(data);
+    }
+  }
+
+  function editMeetingAction(row) {
+    const m = meetingRecords.find(x => x.row === row);
+    if (!m) return;
+
+    document.getElementById('meet-row').value = m.row;
+    document.getElementById('meet-modal-title').innerHTML = '<i class="fa-solid fa-pen-to-square me-2"></i>Edit Meeting';
+    document.getElementById('meet-save-btn').innerText = 'Save Changes';
+
+    const titleInput = document.getElementById('meet-title');
+    titleInput.value = m.title;
+    titleInput.oninput = function() { this.value = this.value.toUpperCase(); };
+
+    const d = parseDateSafe(m.date);
+    document.getElementById('meet-date').value = formatLocalDateInput(d);
+    document.getElementById('meet-time').value = m.time || '';
+    document.getElementById('meet-link').value = m.link || '';
+
+    if (m.status === 'COMPLETED') {
+      document.getElementById('meet-extra-fields').classList.remove('d-none');
+      document.getElementById('meet-pax').value = m.pax || '';
+      document.getElementById('meet-remarks').value = m.remarks || '';
+    } else {
+      document.getElementById('meet-extra-fields').classList.add('d-none');
+    }
+
+    if (!addMeetingModalObj) addMeetingModalObj = new bootstrap.Modal(document.getElementById('addMeetingModal'));
+    addMeetingModalObj.show();
+  }
+
+  function deleteMeetingAction(row) {
+    if (!confirm("Are you sure you want to delete this meeting? This cannot be undone.")) return;
+
+    document.getElementById('overlay').style.display = 'flex';
+    document.getElementById('overlay-text').innerText = 'Deleting Meeting...';
+
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      document.getElementById('overlay').style.display = 'none';
+      if (res.status === 'SUCCESS') {
+        fetchMeetingData();
+        showDraftSavedBadge('Meeting Deleted');
+      }
+    }).deleteMeeting(row);
+  }
+
+  function showMeetingReportModal(row) {
+    document.getElementById('report-meet-row').value = row;
+    document.getElementById('report-meet-pax').value = '';
+    document.getElementById('report-meet-remarks').value = '';
+    meetingPhotos = [];
+    document.getElementById('meet-pv').innerHTML = '';
+    if (!meetingReportModalObj) meetingReportModalObj = new bootstrap.Modal(document.getElementById('meetingReportModal'));
+    meetingReportModalObj.show();
+  }
+
+  async function handleMeetImg(files) {
+    if (meetingPhotos.length + files.length > 3) return showToast("Max 3 photos for meetings.");
+    const imgs = Array.from(files).filter(f => f.type.startsWith('image/'));
+    for (const f of imgs) {
+      const compressed = await compressImageFile(f);
+      meetingPhotos.push(compressed);
+    }
+    renderMeetImgs();
+  }
+
+  function renderMeetImgs() {
+    const box = document.getElementById('meet-pv');
+    box.innerHTML = meetingPhotos.map((p, i) => `
+      <div class="photo-item">
+        <img src="${p.base64}">
+        <div class="del-overlay" onclick="meetingPhotos.splice(${i},1);renderMeetImgs()"><i class="fa-solid fa-trash"></i></div>
+      </div>`).join('');
+  }
+
+  function confirmMeetingReport() {
+    const row = document.getElementById('report-meet-row').value;
+    const pax = document.getElementById('report-meet-pax').value;
+    const remarks = document.getElementById('report-meet-remarks').value;
+    if (!pax) return showToast("Please enter number of participants.");
+
+    const btn = document.querySelector('#meetingReportModal .btn-success');
+    btn.setAttribute('data-orig-text', btn.innerHTML);
+    btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Uploading...';
+
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      btn.disabled = false; btn.innerHTML = 'Submit Report';
+      if (res.status === 'SUCCESS') {
+        if (meetingReportModalObj) meetingReportModalObj.hide();
+        fetchMeetingData();
+        showDraftSavedBadge('Meeting Report Submitted');
+      }
+    }).submitMeetingReport(row, pax, meetingPhotos, remarks);
+  }
+
+  // --- Participant Management ---
+  function addPart(forceId = null) {
+    const id = forceId || 'part-' + Date.now() + Math.floor(Math.random() * 1000);
+    const count = document.getElementById('part-container').children.length + 1;
+    const title = `Participant #${count}`;
+
+    const html = `
+      <div class="form-accordion-item nadi-card p-0 position-relative" id="${id}">
+        <button class="btn btn-sm btn-outline-danger position-absolute top-0 end-0 m-2 rounded-circle shadow-sm" style="width:28px;height:28px;padding:0;z-index:10;" onclick="this.closest('.form-accordion-item').remove(); delete localScreeningData['${id}']; persistWorkingState(false);" title="Remove"><i class="fa-solid fa-xmark"></i></button>
+        <div class="form-accordion-header active" onclick="toggleAccordion(this)">
+          <span><i class="fa-solid fa-user me-2 opacity-75"></i> <span class="acc-title">${title}</span></span>
+          <i class="fa-solid fa-chevron-down chevron"></i>
+        </div>
+        <div class="form-accordion-body">
+          <div class="row g-3 align-items-end">
+            <div class="col-md-7"><label class="form-label fw-bold small text-muted text-uppercase">Participant Name</label><input type="text" class="form-control p-name-in fw-bold text-primary" list="memberList" placeholder="Search or type new name..." onchange="audit(this)" oninput="this.closest('.form-accordion-item').querySelector('.acc-title').innerText = this.value || '${title}'"></div>
+            <div class="col-md-5 d-flex gap-2">
+              <button class="btn btn-outline-secondary flex-grow-1" onclick="audit(this.closest('.form-accordion-item').querySelector('.p-name-in'))"><i class="fa-solid fa-magnifying-glass me-1"></i>Verify</button>
+              <button class="btn btn-outline-accent flex-grow-1 btn-health d-none" onclick="openSingleScreening('${id}')"><i class="fa-solid fa-heart-pulse me-1"></i>Health</button>
+            </div>
+          </div>
+          <div id="ub-${id}" class="hidden mt-4 p-3 bg-light rounded-3 border">
+            <div class="d-flex align-items-center mb-3"><i class="fa-solid fa-user-check fs-3 text-success me-3"></i><div><h6 class="m-0 fw-bold text-dark">Existing Member Found</h6><small class="text-muted">Please confirm/update IC</small></div></div>
+            <input type="hidden" class="row-id">
+            <div class="row"><div class="col-md-6"><label class="form-label fw-bold small text-muted text-uppercase">IC Number</label><input type="text" class="form-control ic-upd fw-bold font-monospace" placeholder="e.g. 900101-08-1234"></div></div>
+          </div>
+          <div id="nb-${id}" class="hidden mt-4 p-4 bg-white rounded-3 border border-primary shadow-sm border-opacity-25">
+            <h5 class="fw-bold text-primary mb-4 pb-2 border-bottom"><i class="fa-solid fa-user-plus me-2"></i>New Registration</h5>
+            <div class="row g-3">
+              <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">IC / Passport</label><input type="text" class="form-control n-ic" placeholder="Without dashes" onblur="calc(this)"></div>
+              <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Age</label><input type="number" class="form-control n-age" readonly></div>
+              <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Date of Birth</label><input type="date" class="form-control n-dob" readonly></div>
+              <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Mobile</label><input type="text" class="form-control n-ph" placeholder="e.g. 012-3456789" oninput="formatMobile(this)"></div>
+              <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Email</label><input type="email" class="form-control n-em"></div>
+              <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Race</label><select class="form-select n-race"><option>Melayu</option><option>Cina</option><option>India</option><option>Bumiputera Sabah</option><option>Bumiputera Sarawak</option><option>Lain-Lain</option></select></div>
+              <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Ethnic</label><input type="text" class="form-control n-ethnic" list="ethnicList" placeholder="Search or type..."></div>
+              <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Occupation</label><select class="form-select n-occ"><option>Kerajaan</option><option>Swasta</option><option>Bekerja Sendiri</option><option>Pelajar</option><option>Tidak Bekerja</option></select></div>
+              <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Salary</label><select class="form-select n-sal"><option>No Salary</option><option>RM0 - RM1000</option><option>RM1001 - RM3000</option><option>RM3001 - RM5000</option><option>RM5001 Ke atas</option></select></div>
+              <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Education</label><select class="form-select n-edu"><option>Tadika</option><option>Sekolah Rendah</option><option>Sekolah Menengah</option><option>Sijil</option><option>Diploma</option><option>Ijazah</option></select></div>
+              <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Distance (km)</label><input type="number" class="form-control n-dist"></div>
+              <div class="col-md-4"><label class="form-label fw-bold small text-muted text-uppercase">Join Date</label><input type="date" class="form-control n-join" value="${formatLocalDateInput(new Date())}"></div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    // Close other items
+    document.querySelectorAll('#part-container .form-accordion-header').forEach(h => {
+       h.classList.remove('active');
+       h.closest('.form-accordion-item').querySelector('.form-accordion-body').classList.add('hidden');
+    });
+
+    document.getElementById('part-container').insertAdjacentHTML('beforeend', html);
+    persistWorkingState(false);
+  }
+
+  function audit(inp, forceNew = false) {
+    const val = inp.value.trim().toUpperCase().replace(/\s+/g, ' ');
+    const card = inp.closest('.nadi-card');
+    const id = card.id;
+    const ub = card.querySelector('div[id^="ub-"]');
+    const nb = card.querySelector('div[id^="nb-"]');
+    ub.classList.add('hidden'); nb.classList.add('hidden');
+
+    // Check if Screening is active
+    const isScreening = Array.from(document.querySelectorAll('#prog-container .p-sub')).some(s => s.value === 'Screening');
+    const healthBtn = card.querySelector('.btn-health');
+    if (healthBtn) {
+      healthBtn.classList.toggle('d-none', !isScreening || !val);
+      if (localScreeningData[id]) {
+        healthBtn.classList.remove('btn-outline-accent');
+        healthBtn.classList.add('btn-success', 'text-white');
+        healthBtn.innerHTML = '<i class="fa-solid fa-check-circle me-1"></i>Health';
+      } else {
+        healthBtn.classList.add('btn-outline-accent');
+        healthBtn.classList.remove('btn-success', 'text-white');
+        healthBtn.innerHTML = '<i class="fa-solid fa-heart-pulse me-1"></i>Health';
+      }
+    }
+
+    if(!val) return persistWorkingState(false);
+
+    const found = forceNew ? null : memberRecords.find(x => x.name === val);
+    if(found) {
+      ub.classList.remove('hidden');
+      ub.querySelector('.row-id').value = found.row;
+      ub.querySelector('.ic-upd').value = found.ic;
+    } else {
+      nb.classList.remove('hidden');
+    }
+
+    if (isScreening && !localScreeningData[id] && !isRestoring) {
+      openSingleScreening(id);
+    }
+
+    persistWorkingState(false);
+  }
+
+  function calc(inp) {
+    let ic = inp.value.replace(/[^0-9]/g, '');
+    if(ic.length >= 6) {
+      let yr = parseInt(ic.substring(0,2), 10);
+      let mo = parseInt(ic.substring(2,4), 10) - 1;
+      let da = parseInt(ic.substring(4,6), 10);
+      yr += (yr > (new Date().getFullYear() % 100)) ? 1900 : 2000;
+      let dob = new Date(yr, mo, da);
+      let age = new Date().getFullYear() - dob.getFullYear();
+      if(new Date() < new Date(new Date().getFullYear(), dob.getMonth(), dob.getDate())) age--;
+      const c = inp.closest('div[id^="nb-"]');
+      c.querySelector('.n-age').value = age;
+      c.querySelector('.n-dob').value = `${dob.getFullYear()}-${('0'+(mo+1)).slice(-2)}-${('0'+da).slice(-2)}`;
+    }
+    persistWorkingState(false);
+  }
+
+  // --- Image Handling ---
+  function compressImageFile(file, maxSize = 1600, quality = 0.82) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('read error'));
+      reader.onload = event => {
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          const scale = Math.min(1, maxSize / Math.max(width, height));
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve({ base64: dataUrl, pid: Date.now() + Math.random() });
+        };
+        img.onerror = () => reject(new Error('image error'));
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleImg(files, sid) {
+    if(!photoData[sid]) photoData[sid] = [];
+    if(photoData[sid].length + files.length > 5) { showToast("Maximum 5 pictures allowed."); return; }
+    const imgs = Array.from(files).filter(f => f.type.startsWith('image/'));
+    for (const f of imgs) {
+      try {
+        const compressed = await compressImageFile(f);
+        photoData[sid].push(compressed);
+        renderImgs(sid);
+        persistWorkingState(false);
+      } catch (e) {
+        console.warn('image skipped', e);
+      }
+    }
+  }
+
+  function renderImgs(sid) {
+    const box = document.getElementById(`pv-${sid}`);
+    if(!box) return;
+    box.innerHTML = (photoData[sid] || []).map(p => `
+      <div class="photo-item">
+        <img src="${p.base64}">
+        <div class="del-overlay" onclick="delImg('${sid}',${p.pid})"><i class="fa-solid fa-trash"></i></div>
+      </div>`).join('');
+  }
+
+  function delImg(sid, pid) {
+    photoData[sid] = (photoData[sid] || []).filter(x => x.pid !== pid);
+    renderImgs(sid);
+    persistWorkingState(false);
+  }
+
+  // --- Planner ---
+  function fetchPlannerData() {
+    showSkeleton('schedule-timeline');
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => { rawStats = res || []; renderPlannerCalendar(); showPendingPopup(); }).getDashboardStats();
+  }
+
+  function renderPlannerCalendar() {
+    const pending = rawStats.filter(s => s.status === 'PLANNED');
+    const completedKeys = rawStats.filter(s => s.status === 'COMPLETED').map(s => s.compositeKey);
+    const timelineBox = document.getElementById('schedule-timeline');
+    if(!timelineBox) return;
+    if(pending.length === 0) {
+      timelineBox.innerHTML = '<div class="text-center text-muted py-5"><i class="fa-solid fa-mug-hot fs-1 mb-3 d-block text-secondary opacity-50"></i>No planned programs found.<br>Schedule one to get started!</div>';
+      return;
+    }
+    pending.sort((a, b) => parseDateSafe(a.date) - parseDateSafe(b.date));
+    const today = new Date(); today.setHours(0,0,0,0);
+    let html = '';
+    pending.forEach(p => {
+      if (completedKeys.includes(p.compositeKey)) return;
+      const progDate = parseDateSafe(p.date);
+      const isPast = progDate < today;
+      const statusTag = isPast ? '<span class="badge bg-danger-subtle text-danger"><i class="fa-solid fa-circle-exclamation me-1"></i>Overdue</span>' : '<span class="badge bg-light text-dark border"><i class="fa-regular fa-clock me-1"></i>Upcoming</span>';
+      const time12 = formatAMPM(p.time);
+      html += `
+        <div class="timeline-item ${isPast ? 'overdue' : ''}">
+          <div class="timeline-date"><span class="day">${progDate.getDate()}</span><span class="month">${monthNames[progDate.getMonth()]}</span></div>
+          <div class="timeline-content w-100">
+            <div class="d-flex justify-content-between align-items-start w-100">
+              <div>
+                <div class="timeline-title">${escapeHtml(p.progName)}</div>
+                <div class="timeline-meta mb-1">
+                  ${time12 ? `<span class="text-dark fw-bold"><i class="fa-regular fa-clock me-1"></i>${escapeHtml(time12)}</span> &bull; ` : ''}
+                  <span class="text-primary fw-bold">${escapeHtml(p.pillar)}</span> &bull; <span class="text-truncate" style="max-width:150px;">${escapeHtml(p.sub)}</span>
+                </div>
+                <div class="mb-2">${statusTag}</div>
+                ${p.link ? `<div class="small"><i class="fa-solid fa-link me-1 text-accent"></i><a href="${p.link}" target="_blank" class="text-accent text-decoration-none">Meeting Link</a></div>` : ''}
+              </div>
+              <div class="timeline-actions d-flex gap-1">
+                <button class="btn btn-sm btn-success rounded-circle shadow-sm" onclick="markDone('${jsStr(p.progName)}','${jsStr(p.date)}','${jsStr(p.pillar)}','${jsStr(p.module)}','${jsStr(p.sub)}')" title="Complete Session"><i class="fa-solid fa-check"></i></button>
+                <button class="btn btn-sm btn-outline-primary rounded-circle shadow-sm" onclick="editPlan('${jsStr(p.progName)}','${jsStr(p.date)}','${jsStr(p.pillar)}','${jsStr(p.module)}','${jsStr(p.sub)}','${jsStr(p.time)}','${jsStr(p.remarks)}','${jsStr(p.link)}')" title="Edit Plan"><i class="fa-solid fa-pencil"></i></button>
+                <button class="btn btn-sm btn-light text-danger rounded-circle border shadow-sm" onclick="deletePlan('${jsStr(p.progName)}','${jsStr(p.date)}','${jsStr(p.pillar)}','${jsStr(p.module)}','${jsStr(p.sub)}')" title="Delete Plan"><i class="fa-solid fa-trash"></i></button>
+              </div>
+            </div>
+            ${p.remarks ? `<div class="planner-remarks-box"><i class="fa-solid fa-note-sticky me-2 opacity-50"></i>${escapeHtml(p.remarks)}</div>` : ''}
+          </div>
+        </div>`;
+    });
+    timelineBox.innerHTML = html || '<div class="text-center text-muted py-5"><i class="fa-solid fa-check-double fs-1 mb-3 d-block text-success opacity-50"></i>All caught up! No pending items.</div>';
+  }
+
+  function showPendingPopup() {
+    const pending = rawStats.filter(s => s.status === 'PLANNED');
+    const completedKeys = rawStats.filter(s => s.status === 'COMPLETED').map(s => s.compositeKey);
+    const outstanding = pending.filter(p => !completedKeys.includes(p.compositeKey));
+    const listDiv = document.getElementById('pending-list');
+    if (!listDiv || outstanding.length === 0) return;
+    listDiv.innerHTML = outstanding.map(p => `
+      <div class="bg-white border rounded-3 p-3 d-flex justify-content-between align-items-center shadow-sm">
+        <div style="max-width:70%;">
+          <div class="fw-bold text-dark mb-1" style="line-height:1.2;font-size:.95rem;">${escapeHtml(p.progName)}</div>
+          <div class="text-muted" style="font-size:.8rem;"><i class="fa-regular fa-calendar me-1"></i>${escapeHtml(p.date)}</div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-sm btn-primary" onclick="markDone('${jsStr(p.progName)}','${jsStr(p.date)}','${jsStr(p.pillar)}','${jsStr(p.module)}','${jsStr(p.sub)}')">Fill Now</button>
+        </div>
+      </div>`).join('');
+    if (!plannerModalObj) plannerModalObj = new bootstrap.Modal(document.getElementById('plannerModal'));
+    plannerModalObj.show();
+  }
+
+  function markDone(name, date, pillar, mod, sub) {
+    toggle('reg');
+    const latestCard = document.querySelector('#prog-container .nadi-card:last-child');
+    if (latestCard) {
+      latestCard.querySelector('.p-name').value = name;
+      latestCard.querySelector('.p-date').value = (date.includes('-') && date.split('-')[0].length !== 4) ? date.split('-').reverse().join('-') : date;
+      const pSel = latestCard.querySelector('.p-pillar'); pSel.value = pillar; updM(pSel);
+      const mSel = latestCard.querySelector('.p-mod'); mSel.value = mod; updS(mSel);
+      latestCard.querySelector('.p-sub').value = sub;
+    }
+    deletePlan(name, date, pillar, mod, sub);
+    if (plannerModalObj) plannerModalObj.hide();
+    persistWorkingState(false);
+  }
+
+  function editPlan(name, date, pillar, mod, sub, time, remarks, link) {
+    toggle('plan');
+    let latestCard = document.querySelector('#plan-container .nadi-card:last-child');
+    if (!latestCard) {
+      addProg('plan-container', false);
+      latestCard = document.querySelector('#plan-container .nadi-card:last-child');
+    }
+    if (latestCard) {
+      latestCard.querySelector('.p-name').value = name;
+      latestCard.querySelector('.p-date').value = (date.includes('-') && date.split('-')[0].length !== 4) ? date.split('-').reverse().join('-') : date;
+      latestCard.querySelector('.p-time').value = time || '';
+      const pSel = latestCard.querySelector('.p-pillar'); pSel.value = pillar; updM(pSel);
+      const mSel = latestCard.querySelector('.p-mod'); mSel.value = mod; updS(mSel);
+      latestCard.querySelector('.p-sub').value = sub;
+      latestCard.querySelector('.p-remarks').value = remarks || '';
+      latestCard.querySelector('.p-link').value = link || '';
+      latestCard.querySelector('.p-old-key').value = JSON.stringify({ progName: name, date, pillar, module: mod, subModule: sub });
+      latestCard.querySelector('.acc-title').innerText = name || 'Edit Plan';
+    }
+    persistWorkingState(false);
+  }
+
+  function deletePlan(name, date, pillar, mod, sub) {
+    if(!confirm(`Delete planned program: ${name}?`)) return;
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      if (res === 'DELETED') {
+        showToast('Plan deleted');
+        fetchPlannerData();
+      }
+    }).removePlanFromSheet(name, date, pillar, mod, sub);
+  }
+
+  // --- Dashboard & Stats ---
+  function fetchStats() {
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      rawStats = res || [];
+      populateYearDropdown();
+      drawStats();
+      drawReports();
+    }).getDashboardStats();
+  }
+
+  function populateYearDropdown() {
+    const yearSelect = document.getElementById('d-year');
+    if (!yearSelect) return;
+    const years = [...new Set(rawStats.map(s => s.year))].sort((a, b) => b - a);
+    const currentYear = new Date().getFullYear();
+    if (!years.includes(currentYear)) years.push(currentYear);
+    years.sort((a, b) => b - a);
+
+    const selectedYear = yearSelect.value;
+    yearSelect.innerHTML = '';
+    years.forEach(y => {
+      yearSelect.add(new Option(y, y));
+    });
+    if (selectedYear && years.includes(parseInt(selectedYear))) {
+      yearSelect.value = selectedYear;
+    } else {
+      yearSelect.value = currentYear;
+    }
+  }
+
+  function aggregateProgramRows(rows) {
+    const groups = {};
+    rows.forEach(r => {
+      const progKey = `${r.progName}_${r.pillar}_${r.module}_${r.sub}`.toUpperCase();
+      if (!groups[progKey]) {
+        groups[progKey] = {
+          progName: r.progName, pillar: r.pillar, module: r.module, sub: r.sub,
+          month: r.month, year: r.year, sessionMap: {}, sessionCount: 0, paxCount: 0
+        };
+      }
+      const sessionKey = r.date;
+      if (!groups[progKey].sessionMap[sessionKey]) {
+        groups[progKey].sessionMap[sessionKey] = {
+          date: r.date, time: r.time,
+          picUrl: r.picUrl, folderUrl: r.folderUrl,
+          rows: [], paxCount: 0
+        };
+        groups[progKey].sessionCount++;
+      }
+      groups[progKey].sessionMap[sessionKey].rows.push(r);
+      groups[progKey].sessionMap[sessionKey].paxCount++;
+      groups[progKey].paxCount++;
+    });
+    return Object.values(groups).map(g => {
+      g.sessions = Object.values(g.sessionMap).sort((a, b) => parseDateSafe(a.date) - parseDateSafe(b.date));
+      delete g.sessionMap;
+      return g;
+    });
+  }
+
+  function safeRenderChart(ctx, config) {
+    try {
+      return new Chart(ctx, config);
+    } catch (e) {
+      console.error("Chart Render Failed:", e);
+      const container = ctx.canvas.parentElement;
+      if (container) {
+        container.innerHTML = `<div class="d-flex flex-column align-items-center justify-content-center h-100 text-muted">
+          <i class="fa-solid fa-triangle-exclamation mb-2"></i>
+          <div class="small">Chart error</div>
+          <button class="btn btn-sm btn-link" onclick="drawStats()">Retry</button>
+        </div>`;
+      }
+      return null;
+    }
+  }
+
+  function getKpiDefinition() {
+    return [
+      { id: 1, label: 'NADI-Preneur', pillar: 'Entrepreneur', module: 'NADI-Preneur', sub: 'General' },
+      { id: 2, label: 'NADI-EmpowerHER', pillar: 'Entrepreneur', module: 'NADI-EmpowerHER', sub: 'General' },
+      { id: 3, label: 'NADI-KidVenture', pillar: 'Entrepreneur', module: 'NADI-KidVenture', sub: 'General' },
+      { id: 4, label: 'NADI-TinyTechies (SR)', pillar: 'Lifelong Learning', module: 'NADI-TinyTechies', sub: 'Sekolah Rendah' },
+      { id: 5, label: 'NADI-TinyTechies (SM)', pillar: 'Lifelong Learning', module: 'NADI-TinyTechies', sub: 'Sekolah Menengah' },
+      { id: 6, label: 'Nurture: eKelas Pelajar', pillar: 'Lifelong Learning', module: 'NADI-Nurture', sub: 'eKelas Pelajar' },
+      { id: 7, label: 'Nurture: eKelas Usahawan', pillar: 'Lifelong Learning', module: 'NADI-Nurture', sub: 'eKelas Usahawan' },
+      { id: 8, label: 'Nurture: DiLea', pillar: 'Lifelong Learning', module: 'NADI-Nurture', sub: 'DiLea' },
+      { id: 9, label: 'Nurture: Cybersecurity', pillar: 'Lifelong Learning', module: 'NADI-Nurture', sub: 'Cybersecurity' },
+      { id: 10, label: 'eSport', pillar: 'Lifelong Learning', module: 'NADI-SkillForge', sub: 'eSport' },
+      { id: 11, label: 'MAHIR (Pooled)', pillar: 'Lifelong Learning', module: 'NADI-SkillForge', sub: 'MAHIR', pooled: true },
+      { id: 12, label: 'NADI-FlourisHER', pillar: 'Wellbeing', module: 'NADI-FlourisHER', sub: 'Screening', sessionBased: true },
+      { id: 13, label: 'NADI-MenWell', pillar: 'Wellbeing', module: 'NADI-MenWell', sub: 'Screening', sessionBased: true },
+      { id: 14, label: 'NADI-Care (Pooled)', pillar: 'Wellbeing', module: 'NADI-Care', pooled: true, sessionBased: true },
+      { id: 15, label: 'Awareness (SR+SM)', pillar: 'Awareness', module: 'KIS', sub: 'AWARENESS_SR_SM', specialAwareness: true },
+      { id: 16, label: 'Awareness (MCMC)', pillar: 'Awareness', module: 'KIS', sub: 'MCMC' },
+      { id: 17, label: 'Government Initiative', pillar: 'Government Initiative', pooled: true }
+    ];
+  }
+
+  function drawStats() {
+    drawHeatmap();
+    const mon = parseInt(document.getElementById('d-month').value, 10);
+    const yr = parseInt(document.getElementById('d-year').value, 10);
+    const quarter = Math.floor(mon / 3);
+
+    // Global Totals for KPI Cards
+    const completedAll = rawStats.filter(s => s.status === 'COMPLETED');
+    document.getElementById('dash-total-prog').innerText = aggregateProgramRows(completedAll).length;
+    document.getElementById('dash-total-pax').innerText = completedAll.length;
+    document.getElementById('dash-total-planned').innerText = rawStats.filter(s => s.status === 'PLANNED').length;
+
+    const kpis = getKpiDefinition();
+    const statsTable = document.getElementById('stats-body');
+    const breakdownContainer = document.getElementById('detailed-module-breakdown');
+    if (!statsTable || !breakdownContainer) return;
+
+    let tableHtml = '', breakdownHtml = '';
+    let monthlyAchievedCount = 0, quarterlyAchievedCount = 0;
+
+    kpis.forEach(kpi => {
+      // Filter data for this KPI
+      const kpiData = rawStats.filter(s => s.status === 'COMPLETED' && s.year === yr && (
+        (kpi.pooled && kpi.pillar === 'Government Initiative' && s.pillar === kpi.pillar) ||
+        (kpi.pooled && kpi.pillar === 'Wellbeing' && s.pillar === kpi.pillar && s.module === kpi.module) ||
+        (kpi.pooled && kpi.pillar === 'Lifelong Learning' && s.pillar === kpi.pillar && s.module === kpi.module && String(s.sub).toUpperCase().startsWith('MAHIR')) ||
+        (kpi.specialAwareness && s.pillar === kpi.pillar && s.module === kpi.module && (s.sub === 'Sekolah Rendah' || s.sub === 'Sekolah Menengah')) ||
+        (!kpi.pooled && !kpi.specialAwareness && s.pillar === kpi.pillar && s.module === kpi.module && s.sub === kpi.sub)
+      ));
+
+      // Monthly Progress
+      const monthlyData = kpiData.filter(s => s.month === mon);
+      let monthlyCount = 0;
+      if (kpi.specialAwareness) {
+        const sr = monthlyData.filter(s => s.sub === 'Sekolah Rendah');
+        const sm = monthlyData.filter(s => s.sub === 'Sekolah Menengah');
+        const srProg = aggregateProgramRows(sr).length;
+        const smProg = aggregateProgramRows(sm).length;
+        if (srProg >= 1 && sr.length >= 3 && smProg >= 1 && sm.length >= 3) monthlyCount = 1;
+      } else {
+        const grouped = aggregateProgramRows(monthlyData);
+        monthlyCount = kpi.sessionBased ? grouped.reduce((sum, g) => sum + g.sessionCount, 0) : grouped.length;
+      }
+      const monthlyAchieved = monthlyCount >= 1;
+      if (monthlyAchieved) monthlyAchievedCount++;
+
+      // Quarterly Progress
+      const quarterlyData = kpiData.filter(s => Math.floor(s.month / 3) === quarter);
+      let quarterlyCount = 0;
+      if (kpi.specialAwareness) {
+        const sr = quarterlyData.filter(s => s.sub === 'Sekolah Rendah');
+        const sm = quarterlyData.filter(s => s.sub === 'Sekolah Menengah');
+        const srProg = aggregateProgramRows(sr).length;
+        const smProg = aggregateProgramRows(sm).length;
+        // The quarterly target is 3 programs each.
+        if (srProg >= 3 && sr.length >= 3 && smProg >= 3 && sm.length >= 3) quarterlyCount = 3;
+        else quarterlyCount = Math.min(srProg, smProg);
+      } else {
+        const grouped = aggregateProgramRows(quarterlyData);
+        quarterlyCount = kpi.sessionBased ? grouped.reduce((sum, g) => sum + g.sessionCount, 0) : grouped.length;
+      }
+      const quarterlyAchieved = quarterlyCount >= 3;
+      if (quarterlyAchieved) quarterlyAchievedCount++;
+
+      // UI Rendering
+      const statusColor = monthlyAchieved ? 'success' : (monthlyCount > 0 ? 'warning' : 'danger');
+      const statusBadge = monthlyAchieved ? '<span class="badge bg-success">Achieved</span>' : (monthlyCount > 0 ? '<span class="badge bg-warning text-dark">In Progress</span>' : '<span class="badge bg-danger">Required</span>');
+
+      tableHtml += `
+        <tr>
+          <td>
+            <div class="fw-bold text-dark">${escapeHtml(kpi.label)}</div>
+            <div class="small text-muted">${escapeHtml(kpi.pillar)}</div>
+          </td>
+          <td class="text-center">
+            <div class="fw-bold">${monthlyCount} / 1</div>
+            <div class="hud-progress"><div class="hud-progress-bar" style="width: ${Math.min(100, monthlyCount*100)}%"></div></div>
+          </td>
+          <td class="text-center">
+            <div class="fw-bold">${quarterlyCount} / 3</div>
+            <div class="hud-progress"><div class="hud-progress-bar" style="width: ${Math.min(100, (quarterlyCount/3)*100)}%"></div></div>
+          </td>
+          <td class="text-center">${statusBadge}</td>
+        </tr>`;
+
+      let paxHtml = '';
+      if (kpi.specialAwareness) {
+        const srCount = monthlyData.filter(s => s.sub === 'Sekolah Rendah').length;
+        const smCount = monthlyData.filter(s => s.sub === 'Sekolah Menengah').length;
+        paxHtml = `
+          <div class="mt-3 pt-2 border-top border-secondary border-opacity-25 font-monospace small">
+            <div class="d-flex justify-content-between mb-1">
+              <span class="text-muted">PAX_SR</span>
+              <span class="text-accent">${srCount}</span>
+            </div>
+            <div class="d-flex justify-content-between">
+              <span class="text-muted">PAX_SM</span>
+              <span class="text-accent">${smCount}</span>
+            </div>
+          </div>`;
+      } else {
+        paxHtml = `
+          <div class="mt-3 pt-2 border-top border-secondary border-opacity-25 font-monospace small">
+            <div class="d-flex justify-content-between">
+              <span class="text-muted">PAX_TOTAL</span>
+              <span class="text-accent">${monthlyData.length}</span>
+            </div>
+          </div>`;
+      }
+
+      breakdownHtml += `
+        <div class="col-xl-3 col-lg-4 col-md-6">
+          <div class="nadi-card p-3 h-100 achievement-card">
+            <div class="small text-uppercase fw-bold text-muted mb-1">${escapeHtml(kpi.pillar)}</div>
+            <div class="fw-bold text-dark mb-3 text-truncate" title="${escapeHtml(kpi.label)}">${escapeHtml(kpi.label)}</div>
+            <div class="d-flex justify-content-between small mb-1"><span>Monthly</span><span class="fw-bold">${monthlyCount}/1</span></div>
+            <div class="hud-progress mb-3"><div class="hud-progress-bar bg-${statusColor}" style="width: ${Math.min(100, monthlyCount*100)}%"></div></div>
+            <div class="d-flex justify-content-between small mb-1"><span>Quarterly</span><span class="fw-bold">${quarterlyCount}/3</span></div>
+            <div class="hud-progress"><div class="hud-progress-bar" style="width: ${Math.min(100, (quarterlyCount/3)*100)}%"></div></div>
+            ${paxHtml}
+          </div>
+        </div>`;
+    });
+
+    statsTable.innerHTML = tableHtml;
+    breakdownContainer.innerHTML = '<h5 class="fw-bold text-muted mb-4 mt-5"><i class="fa-solid fa-trophy text-warning me-2"></i>Achievement Breakdown</h5><div class="row g-3">' + breakdownHtml + '</div>';
+
+    // Gamification Score
+    const monthlyPerc = Math.round((monthlyAchievedCount / kpis.length) * 100);
+    const quarterlyPerc = Math.round((quarterlyAchievedCount / kpis.length) * 100);
+
+    document.getElementById('kpi-percent').innerText = monthlyPerc + '%';
+
+    // Badge Logic
+    let badgeClass = 'badge-bronze', badgeTitle = 'Bronze Facilitator';
+    if (monthlyPerc >= 100) { badgeClass = 'badge-platinum'; badgeTitle = 'Elite Platinum'; }
+    else if (monthlyPerc >= 75) { badgeClass = 'badge-gold'; badgeTitle = 'Gold Master'; }
+    else if (monthlyPerc >= 50) { badgeClass = 'badge-silver'; badgeTitle = 'Silver Pro'; }
+
+    const badgeContainer = document.getElementById('achievement-badge-container');
+    if (badgeContainer) {
+      badgeContainer.innerHTML = `<span class="badge ${badgeClass} p-3 fs-5 rounded-pill"><i class="fa-solid fa-award me-2"></i>${badgeTitle}</span>`;
+    }
+
+    // Dashboard totals
+    document.getElementById('stat-achieved').innerText = monthlyAchievedCount;
+    document.getElementById('stat-progress').innerText = kpis.length - monthlyAchievedCount;
+
+    const theme = document.documentElement.getAttribute('data-theme');
+    const chartTextColor = theme === 'dark' ? '#f1f5f9' : '#1e293b';
+
+    const ctx = document.getElementById('kpiChart').getContext('2d');
+    if(kpiChartInstance) kpiChartInstance.destroy();
+    kpiChartInstance = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Achieved','Remaining'],
+        datasets: [{
+          data: [monthlyAchievedCount, kpis.length - monthlyAchievedCount],
+          backgroundColor: [monthlyPerc >= 100 ? '#e5e4e2' : '#10b981','#e2e8f0'],
+          borderWidth: 0
+        }]
+      },
+      options: { cutout: '80%', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+    });
+
+    drawAdvancedCharts(chartTextColor);
+    if (!document.getElementById('demographics-section').classList.contains('d-none')) {
+      drawDemographics();
+    }
+  }
+
+  function drawHeatmap() {
+    const container = document.getElementById('activity-heatmap');
+    if (!container) return;
+
+    // Last 365 days
+    const today = new Date();
+    const startDate = new Date();
+    startDate.setDate(today.getDate() - 364);
+
+    const activityMap = {};
+    rawStats.filter(s => s.status === 'COMPLETED').forEach(s => {
+      // s.date is DD-MM-YYYY, convert to YYYY-MM-DD
+      const parts = s.date.split('-');
+      const iso = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      activityMap[iso] = (activityMap[iso] || 0) + 1;
+    });
+
+    let html = '';
+    for (let i = 0; i < 365; i++) {
+      const d = new Date(startDate);
+      d.setDate(startDate.getDate() + i);
+      const iso = d.toISOString().split('T')[0];
+      const count = activityMap[iso] || 0;
+      let level = 0;
+      if (count > 0) level = 1;
+      if (count > 2) level = 2;
+      if (count > 5) level = 3;
+      if (count > 10) level = 4;
+
+      html += `<div class="heatmap-cell level-${level}" title="${iso}: ${count} programs"></div>`;
+    }
+    container.innerHTML = html;
+  }
+
+  function toggleDemographics() {
+    const sec = document.getElementById('demographics-section');
+    const btnText = document.getElementById('demo-toggle-text');
+    if (sec.classList.contains('d-none')) {
+      sec.classList.remove('d-none');
+      btnText.innerText = 'Hide Analysis';
+      drawDemographics();
+    } else {
+      sec.classList.add('d-none');
+      btnText.innerText = 'Show Analysis';
+    }
+  }
+
+  function drawDemographics() {
+    const members = memberRecords || [];
+    const occData = {}, eduData = {}, ageData = { 'Under 18': 0, '18-30': 0, '31-50': 0, '51+': 0 };
+
+    members.forEach(m => {
+      const occ = m.occupation || 'Unknown';
+      occData[occ] = (occData[occ] || 0) + 1;
+      const edu = m.education || 'Unknown';
+      eduData[edu] = (eduData[edu] || 0) + 1;
+      const age = parseInt(m.age, 10);
+      if (age < 18) ageData['Under 18']++;
+      else if (age <= 30) ageData['18-30']++;
+      else if (age <= 50) ageData['31-50']++;
+      else ageData['51+']++;
+    });
+
+    const theme = document.documentElement.getAttribute('data-theme');
+    const textColor = theme === 'dark' ? '#f1f5f9' : '#1e293b';
+
+    renderDemoDonut('demoOccChart', occData, demoOccChart, c => demoOccChart = c);
+    renderDemoBar('demoEduChart', eduData, demoEduChart, c => demoEduChart = c, 'y', textColor);
+    renderDemoBar('demoAgeChart', ageData, demoAgeChart, c => demoAgeChart = c, 'x', textColor);
+  }
+
+  function renderDemoDonut(id, data, instance, setter) {
+    const ctx = document.getElementById(id).getContext('2d');
+    if (instance) instance.destroy();
+    setter(safeRenderChart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: Object.keys(data),
+        datasets: [{ data: Object.values(data), backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#64748b'] }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } } }
+    }));
+  }
+
+  function renderDemoBar(id, data, instance, setter, axis, textColor) {
+    const ctx = document.getElementById(id).getContext('2d');
+    if (instance) instance.destroy();
+    setter(safeRenderChart(ctx, {
+      type: 'bar',
+      data: {
+        labels: Object.keys(data),
+        datasets: [{ data: Object.values(data), backgroundColor: '#3b82f6' }]
+      },
+      options: {
+        indexAxis: axis,
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: textColor, font: { size: 9 } } },
+          y: { ticks: { color: textColor, font: { size: 9 } } }
+        }
+      }
+    }));
+  }
+
+  function exportChart(id, name) {
+    const chart = Chart.getChart(id);
+    if (!chart) return;
+    const link = document.createElement('a');
+    link.href = chart.toBase64Image();
+    link.download = `NADI_${name}_${new Date().toISOString().split('T')[0]}.png`;
+    link.click();
+  }
+
+  function printReport() {
+    const meta = document.getElementById('print-meta-date');
+    if (meta) {
+      const now = new Date();
+      meta.innerText = `Generated on: ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+    }
+    window.print();
+  }
+
+  function drawAdvancedCharts(textColor) {
+    const years = [...new Set(rawStats.map(s => s.year))].sort();
+
+    // YoY Data
+    const yoyLabels = years;
+    const yoyProgData = years.map(y => {
+      const filtered = rawStats.filter(s => s.year === y && s.status === 'COMPLETED');
+      return aggregateProgramRows(filtered).length;
+    });
+    const yoyPaxData = years.map(y => {
+      const filtered = rawStats.filter(s => s.year === y && s.status === 'COMPLETED');
+      return filtered.length;
+    });
+
+    const yoyCtx = document.getElementById('yoyChart').getContext('2d');
+    if(yoyChartInstance) yoyChartInstance.destroy();
+    yoyChartInstance = safeRenderChart(yoyCtx, {
+      type: 'bar',
+      data: {
+        labels: yoyLabels,
+        datasets: [
+          { label: 'Programs', data: yoyProgData, backgroundColor: '#2563eb' },
+          { label: 'Participants', data: yoyPaxData, backgroundColor: '#10b981' }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        onClick: (evt, elements) => {
+          if (elements.length > 0) {
+            const idx = elements[0].index;
+            const year = yoyLabels[idx];
+            document.getElementById('r-month').value = ""; // All months
+            toggle('rep');
+            // We'd need year filtering in drawReports if we wanted exact match,
+            // but for now let's just switch view.
+          }
+        },
+        plugins: { legend: { labels: { color: textColor } } },
+        scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor } } }
+      }
+    });
+
+    // QoQ Data (Current Year)
+    const currentYear = parseInt(document.getElementById('d-year').value, 10);
+    const qoqLabels = ['Q1', 'Q2', 'Q3', 'Q4'];
+    const qoqProgData = [0,0,0,0], qoqPaxData = [0,0,0,0];
+
+    rawStats.filter(s => s.year === currentYear && s.status === 'COMPLETED').forEach(s => {
+      const q = Math.floor(s.month / 3);
+      qoqPaxData[q]++;
+    });
+
+    [0,1,2,3].forEach(q => {
+      const qFilter = rawStats.filter(s => s.year === currentYear && s.status === 'COMPLETED' && Math.floor(s.month / 3) === q);
+      qoqProgData[q] = aggregateProgramRows(qFilter).length;
+    });
+
+    const qoqCtx = document.getElementById('qoqChart').getContext('2d');
+    if(qoqChartInstance) qoqChartInstance.destroy();
+    qoqChartInstance = safeRenderChart(qoqCtx, {
+      type: 'line',
+      data: {
+        labels: qoqLabels,
+        datasets: [
+          { label: 'Total Programs', data: qoqProgData, borderColor: '#2563eb', tension: 0.3, fill: false },
+          { label: 'Total Participants', data: qoqPaxData, borderColor: '#10b981', tension: 0.3, fill: false }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: textColor } } },
+        scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor } } }
+      }
+    });
+  }
+
+  function filterReports() {
+    const q = document.getElementById('rep-search').value.toUpperCase();
+    document.querySelectorAll('#report-container .report-prog-card').forEach(card => {
+       const text = card.innerText.toUpperCase();
+       card.style.display = text.includes(q) ? 'block' : 'none';
+    });
+  }
+
+  function globalReportSearch() {
+    const q = document.getElementById('rep-search').value.trim();
+    if(!q) return showToast("Please enter a search term.");
+
+    document.getElementById('overlay').style.display = 'flex';
+    document.getElementById('overlay-text').innerText = 'Searching Archive...';
+
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      document.getElementById('overlay').style.display = 'none';
+      rawStats = res || [];
+      // Reset filters to show the search results
+      document.getElementById('r-pillar').value = "";
+      document.getElementById('r-month').value = "";
+      drawReports();
+    }).searchReportsGlobal(q);
+  }
+
+  function drawReports() {
+    const reportContainer = document.getElementById('report-container');
+    if (rawStats.length === 0 && !reportContainer.innerHTML.includes('skeleton')) {
+      showSkeleton('report-container');
+    }
+    const pF = document.getElementById('r-pillar').value;
+    const mF = document.getElementById('r-month').value;
+    const filtered = rawStats.filter(s => (!pF || s.pillar === pF) && (mF === '' || s.month === parseInt(mF, 10)) && s.status === 'COMPLETED');
+    const grouped = aggregateProgramRows(filtered);
+    let tree = {};
+    grouped.forEach(g => {
+      if(!tree[g.module]) tree[g.module] = {};
+      if(!tree[g.module][g.sub]) tree[g.module][g.sub] = [];
+      tree[g.module][g.sub].push(g);
+    });
+
+    let html = '';
+    for(let m in tree) {
+      html += `<div class="module-group-header shadow-sm"><i class="fa-solid fa-layer-group me-2 opacity-50"></i>${escapeHtml(m)}</div>`;
+      for(let s in tree[m]) {
+        html += `<div class="sub-group-header">${escapeHtml(s)}</div>`;
+        tree[m][s].forEach(g => {
+          const sessionCount = g.sessionCount || 0;
+          const paxCount = g.paxCount || 0;
+          const firstSesh = g.sessions[0] || {};
+
+          let actionButtons = '';
+          if (firstSesh.picUrl) {
+              actionButtons += `<a href="${firstSesh.picUrl}" target="_blank" class="btn btn-sm btn-outline-primary bg-white fw-bold me-2"><i class="fa-regular fa-image me-2"></i>Evidence</a>`;
+          }
+          if (firstSesh.folderUrl) {
+              actionButtons += `<a href="${firstSesh.folderUrl}" target="_blank" class="btn btn-sm btn-outline-dark bg-white fw-bold"><i class="fa-solid fa-folder-open me-2"></i>Folder</a>`;
+          }
+
+          html += `
+            <div class="nadi-card report-prog-card bg-light p-3 border-0 mb-3 shadow-sm">
+              <div class="d-flex justify-content-between align-items-start mb-3 pb-2 border-bottom border-secondary border-opacity-25 gap-3 flex-wrap">
+                <div>
+                  <span class="fw-bold fs-5 text-dark d-block mb-2">${escapeHtml(g.progName)}</span>
+                  <span class="badge bg-secondary me-2"><i class="fa-regular fa-calendar me-1"></i>${escapeHtml(`${monthNames[g.month]} ${g.year}`)}</span>
+                  <span class="badge bg-info text-dark me-2"><i class="fa-solid fa-layer-group me-1"></i>${sessionCount} Sessions</span>
+                  <span class="badge bg-dark"><i class="fa-solid fa-users me-1"></i>${paxCount} Pax</span>
+                </div>
+                <div class="d-flex align-items-center">
+                  ${actionButtons}
+                </div>
+              </div>
+              <div class="d-flex flex-column gap-3">
+                ${g.sessions.map((sesh, idx) => `
+                  <div class="p-3 rounded-3 border bg-white shadow-sm">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2 pb-2 border-bottom">
+                      <div>
+                        <div class="fw-bold text-primary">Session ${idx + 1}</div>
+                        <div class="small text-muted"><i class="fa-regular fa-calendar me-1"></i>${escapeHtml(sesh.date)} ${sesh.time ? `&nbsp;•&nbsp;<i class="fa-regular fa-clock me-1"></i>${escapeHtml(sesh.time)}` : ''}</div>
+                      </div>
+                      <div class="badge bg-light text-dark border"><i class="fa-solid fa-user-check me-1"></i>${sesh.paxCount} pax</div>
+                    </div>
+                    <div class="table-responsive">
+                      <table class="table table-sm table-borderless mb-0 align-middle">
+                        <tbody>
+                          ${sesh.rows.map((p, i) => `<tr><td width="30" class="text-muted fw-bold">${i + 1}.</td><td class="fw-semibold">${escapeHtml(p.partName)}</td><td class="text-end text-muted font-monospace small"><i class="fa-regular fa-id-card me-1 opacity-50"></i>${escapeHtml(p.partIc || 'No IC')}</td></tr>`).join('')}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>`;
+        });
+      }
+    }
+    document.getElementById('report-container').innerHTML = html || '<div class="text-center py-5 text-muted fs-5"><i class="fa-solid fa-folder-open fs-1 mb-3 d-block opacity-25"></i>No records found for this filter.</div>';
+  }
+
+  // --- Data Sync ---
+  function doSync(statusType) {
+    const pgs = [], pts = [], nms = [], ups = [];
+    const updates = []; // For edited plans
+    const containerId = statusType === 'COMPLETED' ? 'prog-container' : 'plan-container';
+    let isValid = true;
+
+    document.querySelectorAll(`#${containerId} .nadi-card`).forEach(b => {
+      const pNameField = b.querySelector('.p-name');
+      const pillarField = b.querySelector('.p-pillar');
+      const oldKeyField = b.querySelector('.p-old-key');
+
+      if(!pNameField.value.trim() || !pillarField.value) { pNameField.classList.add('invalid-field'); pillarField.classList.add('invalid-field'); isValid = false; }
+      else {
+        const entry = {
+          tempId: b.id,
+          status: statusType,
+          date: b.querySelector('.p-date').value,
+          time: b.querySelector('.p-time').value,
+          progName: pNameField.value.toUpperCase().trim(),
+          pillar: pillarField.value,
+          module: b.querySelector('.p-mod').value,
+          subModule: b.querySelector('.p-sub').value,
+          remarks: b.querySelector('.p-remarks') ? b.querySelector('.p-remarks').value : '',
+          link: b.querySelector('.p-link') ? b.querySelector('.p-link').value : ''
+        };
+
+        if (statusType === 'PLANNED' && oldKeyField && oldKeyField.value) {
+          updates.push({ oldKey: JSON.parse(oldKeyField.value), newData: entry });
+        } else {
+          pgs.push(entry);
+        }
+
+        pNameField.classList.remove('invalid-field');
+        pillarField.classList.remove('invalid-field');
+      }
+    });
+    if(!isValid) return showToast('Please fill in all required highlighted fields.', 'warning');
+
+    if(statusType === 'COMPLETED') {
+      document.querySelectorAll('#part-container .nadi-card').forEach(c => {
+        const nameField = c.querySelector('.p-name-in');
+        const name = nameField.value.toUpperCase().trim();
+        if(!name) { nameField.classList.add('invalid-field'); isValid = false; return; }
+        nameField.classList.remove('invalid-field');
+        pts.push({ name });
+        const nb = c.querySelector('div[id^="nb-"]:not(.hidden)');
+        const ub = c.querySelector('div[id^="ub-"]:not(.hidden)');
+        if(nb) nms.push({
+          name, ic: nb.querySelector('.n-ic').value, mobile: nb.querySelector('.n-ph').value, email: nb.querySelector('.n-em').value,
+          race: nb.querySelector('.n-race').value, ethnic: nb.querySelector('.n-ethnic').value, occupation: nb.querySelector('.n-occ').value,
+          salary: nb.querySelector('.n-sal').value, education: nb.querySelector('.n-edu').value, distance: nb.querySelector('.n-dist').value,
+          dateJoin: nb.querySelector('.n-join').value, age: nb.querySelector('.n-age').value, dob: nb.querySelector('.n-dob').value
+        });
+        if(ub) ups.push({ row: ub.querySelector('.row-id').value, ic: ub.querySelector('.ic-upd').value });
+      });
+    }
+
+    if(!isValid || (pgs.length === 0 && updates.length === 0)) return showToast('Please add or edit at least one program to sync.');
+
+    stopAutoSave = true;
+    const overlay = document.getElementById('overlay');
+    overlay.style.display = 'flex';
+    overlay.classList.add('hud-overlay');
+    overlay.innerHTML = `
+      <div class="scanline-loader"></div>
+      <div class="hud-spinner mb-4"></div>
+      <h3 class="fw-bold text-accent" id="overlay-text">UPLINK_ESTABLISHED</h3>
+      <p class="text-white-50 font-monospace">TRANSMITTING_DATA_PACKETS...</p>
+    `;
+    document.getElementById('overlay-text').innerText = 'ENCRYPTING_AND_SYNCING...';
+
+    const draftContext = { draftId: activeDraftId, loadedFromDrive: loadedDraftFromDrive };
+    // Handle Updates first if any
+    if (updates.length > 0) {
+      let completed = 0;
+      updates.forEach(u => {
+        google.script.run.withFailureHandler(handleApiError).withSuccessHandler(() => {
+          completed++;
+          if (completed === updates.length) {
+            if (pgs.length > 0) {
+              performFinalSync(pgs, pts, nms, ups, photoData, draftContext);
+            } else {
+              finishSyncUI({ status: 'SUCCESS' }, pgs, pts);
+            }
+          }
+        }).updatePlanInSheet(u.oldKey, u.newData);
+      });
+    } else {
+      performFinalSync(pgs, pts, nms, ups, photoData, draftContext);
+    }
+  }
+
+
+  function finishSyncUI(r, programs, participants) {
+      document.getElementById('overlay').style.display='none';
+      if(r && r.status === 'SUCCESS') {
+        finalizeSyncUI(r);
+      } else {
+        showToast('Sync failed.', 'danger');
+        stopAutoSave = false;
+      }
+  }
+
+  function finalizeSyncUI(r) {
+    if(r.folderUrls && r.folderUrls.length > 0) {
+      document.getElementById('drive-link-container').innerHTML = r.folderUrls.map(f =>
+        `<a href="${f.url}" target="_blank" class="btn btn-outline-dark w-100 py-2 mt-2 rounded-3 fw-bold"><i class="fa-brands fa-google-drive me-2 text-primary"></i>Evidence: ${f.name}</a>`
+      ).join('');
+    }
+    if (r.deletedDraft) {
+      activeDraftId = '';
+      loadedDraftFromDrive = false;
+      localStorage.removeItem(LS_ACTIVE);
+      renderDraftList();
+      updateActiveDraftBadge();
+    }
+    document.getElementById('success-modal').style.display='flex';
+    localStorage.removeItem(LS_WORKING);
+    showDraftSavedBadge(r.deletedDraft ? 'Draft Submitted & Removed' : 'Sync Complete');
+  }
+
+  function performFinalSync(pgs, pts, nms, ups, photoData, draftContext) {
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(r => {
+      finishSyncUI(r, pgs, pts);
+    }).submitData(pgs, pts, nms, ups, photoData, draftContext, Object.values(localScreeningData));
+  }
+
+    function openSingleScreening(partId) {
+    const card = document.getElementById(partId);
+    const name = card.querySelector('.p-name-in').value.toUpperCase().trim();
+    if (!name) return;
+
+    if (!screeningModalObj) screeningModalObj = new bootstrap.Modal(document.getElementById('screeningModal'));
+
+    document.getElementById('screening-current-name').innerText = name;
+    document.getElementById('screening-current-id').value = partId;
+
+    const data = localScreeningData[partId] || {};
+    ['sc-height', 'sc-weight', 'sc-bmi', 'sc-sys', 'sc-dia', 'sc-glucose', 'sc-spo2', 'sc-remarks'].forEach(id => {
+      const key = id.replace('sc-', '').replace('sys', 'systolic').replace('dia', 'diastolic');
+      document.getElementById(id).value = data[key] || '';
+    });
+    calcBMI();
+
+    document.getElementById('sc-reference').classList.add('d-none');
+    google.script.run.withSuccessHandler(ref => {
+      if (ref) {
+        document.getElementById('sc-reference').classList.remove('d-none');
+        document.getElementById('sc-ref-content').innerHTML = `
+          <div class="col-6">Date: <b>${ref.date}</b></div>
+          <div class="col-6">BMI: <b>${ref.bmi} (${ref.category})</b></div>
+          <div class="col-6">BP: <b>${ref.systolic}/${ref.diastolic}</b></div>
+          <div class="col-6">Glucose: <b>${ref.glucose}</b></div>
+          <div class="col-12 text-truncate">Remarks: <i>${ref.remarks || '-'}</i></div>
+        `;
+      }
+    }).getLatestScreening(name);
+
+    screeningModalObj.show();
+  }
+
+  function saveHealthRecord() {
+    const partId = document.getElementById('screening-current-id').value;
+    const card = document.getElementById(partId);
+    const name = card.querySelector('.p-name-in').value.toUpperCase().trim();
+
+    localScreeningData[partId] = {
+      name: name,
+      ic: card.querySelector('.ic-upd')?.value || card.querySelector('.n-ic')?.value || '',
+      height: document.getElementById('sc-height').value,
+      weight: document.getElementById('sc-weight').value,
+      bmi: document.getElementById('sc-bmi').value,
+      category: document.getElementById('sc-bmi-badge').innerText,
+      systolic: document.getElementById('sc-sys').value,
+      diastolic: document.getElementById('sc-dia').value,
+      glucose: document.getElementById('sc-glucose').value,
+      spo2: document.getElementById('sc-spo2').value,
+      remarks: document.getElementById('sc-remarks').value
+    };
+
+    const healthBtn = card.querySelector('.btn-health');
+    if (healthBtn) {
+      healthBtn.classList.remove('btn-outline-accent');
+      healthBtn.classList.add('btn-success', 'text-white');
+      healthBtn.innerHTML = '<i class="fa-solid fa-check-circle me-1"></i>Health';
+    }
+
+    screeningModalObj.hide();
+    persistWorkingState(false);
+  }
+
+  function skipScreening() {
+    screeningModalObj.hide();
+  }
+
+  function calcBMI() {
+    const h = parseFloat(document.getElementById('sc-height').value) / 100;
+    const w = parseFloat(document.getElementById('sc-weight').value);
+    const bmiInp = document.getElementById('sc-bmi');
+    const badge = document.getElementById('sc-bmi-badge');
+
+    if (h > 0 && w > 0) {
+      const bmi = (w / (h * h)).toFixed(1);
+      bmiInp.value = bmi;
+
+      let cat = '', cls = '';
+      if (bmi < 18.5) { cat = 'Underweight'; cls = 'bmi-underweight'; }
+      else if (bmi < 25) { cat = 'Normal'; cls = 'bmi-normal'; }
+      else if (bmi < 30) { cat = 'Overweight'; cls = 'bmi-overweight'; }
+      else { cat = 'Obese'; cls = 'bmi-obese'; }
+
+      badge.innerText = cat;
+      badge.className = 'input-group-text small fw-bold ' + cls;
+    } else {
+      bmiInp.value = '';
+      badge.innerText = '--';
+      badge.className = 'input-group-text small fw-bold';
+    }
+  }
+
+  function exportToCSV() {
+    const pF = document.getElementById('r-pillar').value;
+    const mF = document.getElementById('r-month').value;
+    const filtered = rawStats.filter(s => (!pF || s.pillar === pF) && (mF === '' || s.month === parseInt(mF, 10)) && s.status === 'COMPLETED');
+
+    if (filtered.length === 0) return showToast("No data to export.");
+
+    let csv = "Pillar,Module,Sub-Module,Program Name,Date,Time,Participant Name,IC\n";
+    filtered.forEach(r => {
+      csv += `"${r.pillar}","${r.module}","${r.sub}","${r.progName}","${r.date}","${r.time}","${r.partName}","${r.partIc}"\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `NADI_Export_${new Date().toISOString().slice(0,10)}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  function refreshPage() {
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(function(url) {
+      window.open(url, '_top');
+    }).getScriptUrl();
+  }
+
+  function scrollToTable(id) {
+    const el = document.getElementById(id);
+    if(el) {
+      document.querySelectorAll('.table-target-row').forEach(row => row.classList.remove('highlight-row'));
+      el.scrollIntoView({ behavior:'smooth', block:'center' });
+      el.classList.add('highlight-row');
+    }
+  }
+
+  function saveNotifSettings() {
+    const enabled = document.getElementById('notif-enabled').checked;
+    const email = document.getElementById('notif-email').value;
+    document.getElementById('notif-details').classList.toggle('d-none', !enabled);
+
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(() => {
+      showToast('Notification settings updated');
+    }).setNotifSettings({ enabled, email });
+  }
+
+  function loadNotifSettings() {
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(settings => {
+      if (settings) {
+        document.getElementById('notif-enabled').checked = settings.enabled;
+        document.getElementById('notif-email').value = settings.email || '';
+        document.getElementById('notif-details').classList.toggle('d-none', !settings.enabled);
+      }
+    }).getNotifSettings();
+  }
+
+  function bootApp() {
+    initTheme();
+    loadWorkingState();
+    updateActiveDraftBadge();
+    loadNotifSettings();
+    setInterval(() => { persistWorkingState(false); }, 7000);
+    toggle('reg');
+  }
+
+  window.onload = () => {
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(d => {
+      masterData = d || {};
+      appReady.master = true;
+      Object.keys(d || {}).forEach(k => document.getElementById('r-pillar').add(new Option(k, k)));
+      if(appReady.master && appReady.members) bootApp();
+    }).getModuleData();
+
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(r => {
+      memberRecords = r || [];
+      populateDatalists();
+      appReady.members = true;
+      if(appReady.master && appReady.members) bootApp();
+    }).getMemberData();
+
+    document.getElementById('d-month').value = new Date().getMonth();
+    document.getElementById('d-year').value = new Date().getFullYear();
+    document.getElementById('m-filter-month').value = new Date().getMonth();
+  };
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      const modalEl = document.getElementById('draftSaveModal');
+      if (modalEl && modalEl.classList.contains('show')) {
+        const target = e.target;
+        if (target && target.id === 'draft-name-input') {
+          e.preventDefault();
+          confirmSaveDraft();
+        }
+      }
+    }
+  });
+</script>

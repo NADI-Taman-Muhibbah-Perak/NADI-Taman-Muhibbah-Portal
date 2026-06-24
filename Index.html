@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>NADI Portal</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <div class="report-print-header">
+    <h3 class="fw-bold m-0">Laporan Aktiviti & Kehadiran</h3>
+    <h5 class="text-muted">Pusat Sebaran Maklumat Nasional (NADI) Taman Muhibbah, Perak</h5>
+    <div class="small mt-2" id="print-meta-date"></div>
+  </div>
+
+  <nav class="navbar navbar-expand-lg sticky-top mb-4">
+    <div class="container">
+      <a class="navbar-brand" href="#"><i class="fa-solid fa-cloud-arrow-up me-2 text-accent"></i>Portal NADI Taman Muhibbah</a>
+
+      <!-- Mobile Theme Toggle -->
+      <div class="d-flex align-items-center d-lg-none">
+        <div class="theme-toggle" onclick="toggleTheme()" title="Toggle Theme" role="button" aria-label="Toggle dark mode" tabindex="0">
+          <i id="theme-icon-mob" class="fa-solid fa-moon"></i>
+        </div>
+      </div>
+
+      <button class="navbar-toggler border-0 d-none" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu"><i class="fa-solid fa-bars text-white"></i></button>
+
+      <div class="collapse navbar-collapse" id="navMenu">
+        <div class="navbar-nav ms-auto align-items-center">
+          <a class="nav-link active" id="tab-reg" href="#" onclick="toggle('reg')"><i class="fa-solid fa-pen-to-square me-1"></i>Register</a>
+          <a class="nav-link" id="tab-plan" href="#" onclick="toggle('plan')"><i class="fa-solid fa-calendar-plus me-1"></i>Planner</a>
+          <a class="nav-link" id="tab-dash" href="#" onclick="toggle('dash')"><i class="fa-solid fa-chart-pie me-1"></i>Dashboard</a>
+          <a class="nav-link" id="tab-rep" href="#" onclick="toggle('rep')"><i class="fa-solid fa-file-lines me-1"></i>Reports</a>
+          <a class="nav-link" id="tab-mem" href="#" onclick="toggle('mem')"><i class="fa-solid fa-users-gear me-1"></i>Members</a>
+          <a class="nav-link" id="tab-meet" href="#" onclick="toggle('meet')"><i class="fa-solid fa-handshake me-1"></i>Meetings</a>
+          <a class="nav-link" id="tab-drafts" href="#" onclick="toggle('drafts')"><i class="fa-solid fa-floppy-disk me-1"></i>Drafts <span id="nav-draft-badge" class="badge bg-danger rounded-pill ms-1 d-none" style="font-size:0.65rem;">Active</span></a>
+          <div class="theme-toggle ms-lg-3 d-none d-lg-flex" onclick="toggleTheme()" title="Toggle Theme" role="button" aria-label="Toggle dark mode" tabindex="0">
+            <i id="theme-icon" class="fa-solid fa-moon"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div id="v-reg" class="view-section">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="h4 fw-bold m-0"><i class="fa-solid fa-clipboard-check text-success me-2"></i>Completed Sessions</h2>
+        <button class="btn btn-primary btn-sm rounded-pill px-3 shadow-sm" onclick="addProg('prog-container', true)"><i class="fa-solid fa-plus me-1"></i>Add Session</button>
+      </div>
+      <div id="prog-container"></div>
+      
+      <div class="d-flex justify-content-between align-items-center mt-5 mb-3">
+        <h2 class="h4 fw-bold m-0"><i class="fa-solid fa-users text-accent me-2"></i>Participants</h2>
+        <button class="btn btn-dark btn-sm rounded-pill px-3 shadow-sm" onclick="addPart()"><i class="fa-solid fa-user-plus me-1"></i>Add Person</button>
+      </div>
+      <div class="alert alert-info border-0 bg-info-subtle text-info-emphasis rounded-3 shadow-sm">
+        <i class="fa-solid fa-circle-info me-2"></i>Type a name below. If they exist in the database, their IC will be verified. Otherwise, full registration is required.
+      </div>
+      <div id="part-container"></div>
+
+      <div class="d-flex justify-content-between align-items-center mt-4 bg-white p-3 rounded-3 shadow-sm border">
+        <button class="btn btn-outline-secondary px-4 fw-bold" onclick="showDraftModal()"><i class="fa-solid fa-cloud-arrow-up me-2"></i>Save to Cloud</button>
+        <button class="btn btn-success px-5 py-2 fs-5 shadow btn-pulse" onclick="doSync('COMPLETED')"><i class="fa-solid fa-paper-plane me-2"></i>Submit Report</button>
+      </div>
+    </div>
+
+    <div id="v-plan" class="view-section hidden">
+      <div class="row g-4">
+        <div class="col-lg-7">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h4 fw-bold m-0"><i class="fa-solid fa-calendar-plus text-primary me-2"></i>Schedule Future Session</h2>
+            <button class="btn btn-primary btn-sm rounded-pill px-3 shadow-sm" onclick="addProg('plan-container', false)"><i class="fa-solid fa-plus me-1"></i>Add Plan</button>
+          </div>
+          <div id="plan-container"></div>
+          <button class="btn btn-primary w-100 py-3 mt-3 shadow fs-5" onclick="doSync('PLANNED')"><i class="fa-solid fa-calendar-check me-2"></i>Save to Planner</button>
+        </div>
+        <div class="col-lg-5">
+          <div class="nadi-card bg-light border-0 sticky-top" style="top: 90px;">
+            <div class="section-title text-primary"><i class="fa-solid fa-clock-rotate-left me-2"></i>Upcoming Schedule</div>
+            <div id="schedule-timeline" class="pe-2" style="max-height: 60vh; overflow-y: auto;">
+              <div class="text-center text-muted py-5"><div class="spinner-border text-primary spinner-border-sm me-2"></div>Loading...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="v-dash" class="view-section hidden">
+      <div class="row g-3 mb-4">
+        <div class="col-md-4 col-lg-2">
+          <div class="nadi-card text-center p-3 h-100 bg-white border-primary border-opacity-25">
+            <div class="text-muted small text-uppercase fw-bold mb-1">Programs</div>
+            <div class="h2 fw-bold text-primary m-0" id="dash-total-prog">0</div>
+          </div>
+        </div>
+        <div class="col-md-4 col-lg-2">
+          <div class="nadi-card text-center p-3 h-100 bg-white border-success border-opacity-25">
+            <div class="text-muted small text-uppercase fw-bold mb-1">Participants</div>
+            <div class="h2 fw-bold text-success m-0" id="dash-total-pax">0</div>
+          </div>
+        </div>
+        <div class="col-md-4 col-lg-2">
+          <div class="nadi-card text-center p-3 h-100 bg-white">
+            <div class="text-muted small text-uppercase fw-bold mb-1">Upcoming</div>
+            <div class="h2 fw-bold text-dark m-0" id="dash-total-planned">0</div>
+          </div>
+        </div>
+        <div class="col-md-12 col-lg-6">
+          <div class="nadi-card p-3 h-100 d-flex align-items-center justify-content-between bg-white border-0 shadow-sm" id="active-draft-banner" style="display:none !important;">
+            <div class="d-flex align-items-center">
+              <div class="rounded-circle bg-warning bg-opacity-10 p-3 me-3 text-warning"><i class="fa-solid fa-file-pen fs-4"></i></div>
+              <div>
+                <div class="fw-bold text-dark" id="draft-banner-name">No Active Draft</div>
+                <div class="small text-muted" id="draft-banner-meta">Last edited: --</div>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-primary rounded-pill px-4 fw-bold" onclick="toggle('drafts')">Resume</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="nadi-card border-0 shadow-sm mb-4 bg-white">
+        <div class="row align-items-center g-2">
+          <div class="col-md-8 d-flex flex-wrap gap-2">
+            <select id="d-month" class="form-select w-auto shadow-sm" onchange="drawStats()">
+              <option value="0">January</option><option value="1">February</option><option value="2">March</option><option value="3">April</option>
+              <option value="4">May</option><option value="5">June</option><option value="6">July</option><option value="7">August</option>
+              <option value="8">September</option><option value="9">October</option><option value="10">November</option><option value="11">December</option>
+            </select>
+            <select id="d-year" class="form-select w-auto shadow-sm" onchange="drawStats()">
+              <option value="2024">2024</option><option value="2025">2025</option><option value="2026">2026</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-4 mb-4">
+        <div class="col-lg-4">
+          <div class="nadi-card h-100 d-flex flex-column justify-content-center align-items-center bg-gradient-primary text-white position-relative overflow-hidden">
+            <div class="scanline-loader opacity-25"></div>
+            <div class="fs-6 text-uppercase fw-bold opacity-75 mb-2">Monthly Achievement</div>
+            <div class="display-1 fw-bold mb-3" id="kpi-percent">0%</div>
+            <div id="achievement-badge-container"></div>
+          </div>
+        </div>
+        <div class="col-lg-8">
+          <div class="nadi-card h-100 bg-white">
+            <div class="row align-items-center h-100">
+              <div class="col-md-5 text-center mb-3 mb-md-0">
+                <div style="position: relative; height: 180px; width: 100%;">
+                  <canvas id="kpiChart"></canvas>
+                </div>
+              </div>
+              <div class="col-md-7">
+                <div class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom">
+                  <div class="d-flex align-items-center"><span style="width:12px;height:12px;background:var(--success-color);border-radius:50%;margin-right:10px;"></span><span class="fw-bold">KPIs Achieved</span></div>
+                  <span class="badge bg-success fs-6 rounded-pill" id="stat-achieved">0</span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                  <div class="d-flex align-items-center"><span style="width:12px;height:12px;background:var(--border-color);border-radius:50%;margin-right:10px;"></span><span class="fw-bold">Remaining</span></div>
+                  <span class="badge bg-light text-dark fs-6 rounded-pill border" id="stat-progress">0</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity Heatmap -->
+      <div class="nadi-card mb-4 bg-white border-0 shadow-sm">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h5 class="fw-bold m-0"><i class="fa-solid fa-calendar-day me-2 text-primary"></i>Program Activity Heatmap</h5>
+          <div class="small text-muted">Last 12 Months</div>
+        </div>
+        <div class="heatmap-container overflow-auto">
+          <div id="activity-heatmap" class="heatmap-grid"></div>
+        </div>
+        <div class="d-flex align-items-center justify-content-end mt-2 small text-muted">
+          <span class="me-2">Less</span>
+          <div class="heatmap-legend d-flex gap-1">
+            <div class="heatmap-cell level-0"></div>
+            <div class="heatmap-cell level-1"></div>
+            <div class="heatmap-cell level-2"></div>
+            <div class="heatmap-cell level-3"></div>
+            <div class="heatmap-cell level-4"></div>
+          </div>
+          <span class="ms-2">More</span>
+        </div>
+      </div>
+
+      <div class="row g-4 mb-4">
+        <div class="col-md-6">
+          <div class="nadi-card h-100">
+            <div class="d-flex justify-content-between align-items-start mb-4">
+              <h5 class="fw-bold m-0"><i class="fa-solid fa-chart-bar me-2 text-primary"></i>Year-over-Year Trends</h5>
+              <button class="btn btn-sm btn-link p-0" onclick="exportChart('yoyChart', 'YoY_Trends')" title="Download PNG"><i class="fa-solid fa-download"></i></button>
+            </div>
+            <div class="chart-container">
+              <canvas id="yoyChart"></canvas>
+            </div>
+            <div class="small text-muted mt-2"><i class="fa-solid fa-circle-info me-1"></i>Click a bar to filter Reports by that month</div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="nadi-card h-100">
+            <h5 class="fw-bold mb-4"><i class="fa-solid fa-chart-line me-2 text-success"></i>Quarterly Progress</h5>
+            <div class="chart-container">
+              <canvas id="qoqChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="detailed-module-breakdown" class="row g-3 mb-4"></div>
+
+      <div class="row g-4 mb-4">
+        <div class="col-lg-6">
+          <div class="nadi-card h-100 border-0 shadow-sm bg-white" id="notif-settings-card">
+            <h5 class="fw-bold mb-4"><i class="fa-solid fa-envelope-open-text me-2 text-primary"></i>Email Notifications</h5>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" id="notif-enabled" onchange="saveNotifSettings()">
+              <label class="form-check-label fw-bold" for="notif-enabled">Daily Reminder Digest</label>
+            </div>
+            <p class="small text-muted mb-4">Receive a summary of sessions scheduled for the next 7 days every morning at 7:00 AM.</p>
+            <div id="notif-details" class="d-none">
+              <label class="form-label small fw-bold text-muted text-uppercase">Recipient Email</label>
+              <div class="input-group">
+                <input type="email" id="notif-email" class="form-control" placeholder="staff@gmail.com">
+                <button class="btn btn-primary" onclick="saveNotifSettings()">Update</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+           <!-- Placeholder for more dash items -->
+        </div>
+      </div>
+
+      <!-- Member Demographics -->
+      <div class="nadi-card mb-4 bg-white border-0 shadow-sm">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+          <h5 class="fw-bold m-0"><i class="fa-solid fa-users-viewfinder me-2 text-accent"></i>Member Demographics</h5>
+          <button class="btn btn-sm btn-outline-secondary rounded-pill" onclick="toggleDemographics()">
+            <span id="demo-toggle-text">Show Analysis</span>
+          </button>
+        </div>
+        <div id="demographics-section" class="d-none">
+          <div class="row g-4">
+            <div class="col-md-4">
+              <div class="text-center mb-2 fw-bold small text-uppercase">Occupation</div>
+              <div style="height: 200px;"><canvas id="demoOccChart"></canvas></div>
+            </div>
+            <div class="col-md-4">
+              <div class="text-center mb-2 fw-bold small text-uppercase">Education Level</div>
+              <div style="height: 200px;"><canvas id="demoEduChart"></canvas></div>
+            </div>
+            <div class="col-md-4">
+              <div class="text-center mb-2 fw-bold small text-uppercase">Age Distribution</div>
+              <div style="height: 200px;"><canvas id="demoAgeChart"></canvas></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="nadi-card shadow-sm table-responsive bg-white">
+        <table class="table table-hover align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>KPI Category</th>
+              <th class="text-center">Monthly Progress (P/1)</th>
+              <th class="text-center">Quarterly Target (P/3)</th>
+              <th class="text-center">Monthly Status</th>
+            </tr>
+          </thead>
+          <tbody id="stats-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="v-rep" class="view-section hidden">
+      <div class="nadi-card border-0 shadow-sm mb-4 bg-white">
+        <div class="row align-items-center g-3">
+          <div class="col-md-4">
+            <div class="input-group shadow-sm">
+              <span class="input-group-text bg-white border-end-0"><i class="fa-solid fa-magnifying-glass text-muted"></i></span>
+              <input type="text" id="rep-search" class="form-control border-start-0" placeholder="Search reports..." onkeyup="filterReports()">
+              <button class="btn btn-outline-secondary" onclick="globalReportSearch()" title="Global Search"><i class="fa-solid fa-globe"></i></button>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <select id="r-pillar" class="form-select shadow-sm" onchange="drawReports()">
+              <option value="">All Pillars</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <select id="r-month" class="form-select shadow-sm" onchange="drawReports()">
+              <option value="">All Months</option>
+              <option value="0">January</option><option value="1">February</option><option value="2">March</option><option value="3">April</option>
+              <option value="4">May</option><option value="5">June</option><option value="6">July</option><option value="7">August</option>
+              <option value="8">September</option><option value="9">October</option><option value="10">November</option><option value="11">December</option>
+            </select>
+          </div>
+          <div class="col-md-3 text-end d-flex gap-2">
+            <button class="btn btn-light shadow-sm border" onclick="printReport()" title="Print Report"><i class="fa-solid fa-print"></i></button>
+            <button class="btn btn-export shadow-sm w-100" onclick="exportToCSV()"><i class="fa-solid fa-file-export me-2"></i>Export to CSV</button>
+          </div>
+        </div>
+      </div>
+      <div id="report-container"></div>
+    </div>
+
+    <div id="v-drafts" class="view-section hidden">
+      <div class="nadi-card border-0 shadow-sm mb-4">
+        <div class="d-flex justify-content-between align-items-center">
+          <h2 class="h4 fw-bold m-0"><i class="fa-solid fa-cloud text-primary me-2"></i>Cloud Drafts</h2>
+          <button class="btn btn-sm btn-outline-primary" onclick="renderDraftList()"><i class="fa-solid fa-rotate-right me-1"></i>Refresh</button>
+        </div>
+        <p class="text-muted small m-0 mt-1">Manage unfinished sessions saved securely to Google Drive.</p>
+      </div>
+      <div id="draft-list-container">
+        <div class="text-center text-muted py-5"><div class="spinner-border text-primary spinner-border-sm me-2"></div>Loading Drafts...</div>
+      </div>
+    </div>
+
+    <div id="v-mem" class="view-section hidden">
+      <div class="nadi-card border-0 shadow-sm mb-4">
+        <div class="row align-items-center g-3">
+          <div class="col-md-4"><h2 class="h4 fw-bold m-0"><i class="fa-solid fa-users-gear text-primary me-2"></i>Member Management</h2></div>
+          <div class="col-md-5">
+            <div class="input-group">
+              <span class="input-group-text bg-white border-end-0"><i class="fa-solid fa-magnifying-glass text-muted"></i></span>
+              <input type="text" id="mem-search" class="form-control border-start-0" placeholder="Search by name or IC..." onkeyup="filterMembers()">
+            </div>
+          </div>
+          <div class="col-md-3 text-end">
+            <button class="btn btn-outline-danger w-100" onclick="showMergeModal()"><i class="fa-solid fa-code-merge me-2"></i>Merge Tools</button>
+          </div>
+        </div>
+      </div>
+      <div id="member-list-container" class="row g-3"></div>
+    </div>
+
+    <div id="v-meet" class="view-section hidden">
+      <div class="nadi-card border-0 shadow-sm mb-4">
+        <div class="row align-items-center g-3">
+          <div class="col-md-5">
+            <h2 class="h4 fw-bold m-0"><i class="fa-solid fa-handshake text-primary me-2"></i>Meetings & Engagements</h2>
+          </div>
+          <div class="col-md-4">
+            <select id="m-filter-month" class="form-select shadow-sm" onchange="renderMeetingList()">
+              <option value="">All Months</option>
+              <option value="0">January</option><option value="1">February</option><option value="2">March</option><option value="3">April</option>
+              <option value="4">May</option><option value="5">June</option><option value="6">July</option><option value="7">August</option>
+              <option value="8">September</option><option value="9">October</option><option value="10">November</option><option value="11">December</option>
+            </select>
+          </div>
+          <div class="col-md-3 text-end">
+            <button class="btn btn-primary w-100" onclick="showAddMeetingModal()"><i class="fa-solid fa-plus me-2"></i>Add Meeting</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-4">
+        <div class="col-lg-12">
+          <div id="meeting-list-container"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <datalist id="memberList"></datalist>
+  <datalist id="ethnicList"></datalist>
+
+  <div class="overlay" id="overlay">
+    <div class="spinner-border text-primary" style="width: 4rem; height: 4rem;" role="status"></div>
+    <h3 class="mt-4 fw-bold" id="overlay-text">Processing...</h3>
+    <p class="text-white-50">Please do not close this window.</p>
+  </div>
+
+  <div class="overlay" id="success-modal" style="background: rgba(15,23,42,0.95);">
+    <div class="text-center bg-white p-5 rounded-4 shadow-lg" style="max-width: 450px; width: 90%;">
+      <div class="mb-4 text-success"><i class="fa-solid fa-circle-check" style="font-size: 5rem;"></i></div>
+      <h2 class="fw-bold text-dark mb-3">Sync Complete!</h2>
+      <p class="text-muted mb-4">All data has been successfully securely transmitted to the portal database.</p>
+      <div id="drive-link-container"></div>
+      <button class="btn btn-primary w-100 py-3 mt-3 rounded-3 fw-bold" onclick="refreshPage()">Start New Session</button>
+    </div>
+  </div>
+
+  <div class="modal fade" id="plannerModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        <div class="modal-header bg-primary text-white border-0 rounded-top-4">
+          <h5 class="modal-title fw-bold"><i class="fa-solid fa-bell me-2"></i>Pending Executions</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4">
+          <p class="text-muted mb-4">You have planned sessions that require actual execution reports. Select one to fill it out now.</p>
+          <div id="pending-list" class="d-flex flex-column gap-2"></div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-light fw-bold" data-bs-dismiss="modal">I'll do it later</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Member Edit Modal -->
+  <div class="modal fade" id="memberEditModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        <div class="modal-header bg-primary text-white border-0 rounded-top-4">
+          <h5 class="modal-title fw-bold"><i class="fa-solid fa-user-pen me-2"></i>Edit Member Details</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4">
+          <input type="hidden" id="edit-mem-row">
+          <div class="row g-3">
+            <div class="col-md-6"><label class="form-label fw-bold small">Full Name</label><input type="text" id="edit-mem-name" class="form-control"></div>
+            <div class="col-md-6"><label class="form-label fw-bold small">IC / Passport</label><input type="text" id="edit-mem-ic" class="form-control"></div>
+            <div class="col-md-6"><label class="form-label fw-bold small">Mobile</label><input type="text" id="edit-mem-ph" class="form-control"></div>
+            <div class="col-md-6"><label class="form-label fw-bold small">Email</label><input type="email" id="edit-mem-em" class="form-control"></div>
+            <div class="col-md-4"><label class="form-label fw-bold small">Race</label><select id="edit-mem-race" class="form-select"><option>Melayu</option><option>Cina</option><option>India</option><option>Bumiputera Sabah</option><option>Bumiputera Sarawak</option><option>Lain-Lain</option></select></div>
+            <div class="col-md-4"><label class="form-label fw-bold small">Ethnic</label><input type="text" id="edit-mem-ethnic" class="form-control"></div>
+            <div class="col-md-4"><label class="form-label fw-bold small">Occupation</label><select id="edit-mem-occ" class="form-select"><option>Kerajaan</option><option>Swasta</option><option>Bekerja Sendiri</option><option>Pelajar</option><option>Tidak Bekerja</option></select></div>
+            <div class="col-md-4"><label class="form-label fw-bold small">Salary</label><select id="edit-mem-sal" class="form-select"><option>No Salary</option><option>RM0 - RM1000</option><option>RM1001 - RM3000</option><option>RM3001 - RM5000</option><option>RM5001 Ke atas</option></select></div>
+            <div class="col-md-4"><label class="form-label fw-bold small">Education</label><select id="edit-mem-edu" class="form-select"><option>Tadika</option><option>Sekolah Rendah</option><option>Sekolah Menengah</option><option>Sijil</option><option>Diploma</option><option>Ijazah</option></select></div>
+            <div class="col-md-4"><label class="form-label fw-bold small">Distance (km)</label><input type="number" id="edit-mem-dist" class="form-control"></div>
+            <div class="col-md-4"><label class="form-label fw-bold small">Join Date</label><input type="text" id="edit-mem-join" class="form-control"></div>
+            <div class="col-md-4"><label class="form-label fw-bold small">Age</label><input type="number" id="edit-mem-age" class="form-control"></div>
+            <div class="col-md-4"><label class="form-label fw-bold small">DOB</label><input type="text" id="edit-mem-dob" class="form-control"></div>
+          </div>
+
+          <div class="mt-4 pt-4 border-top">
+            <h6 class="fw-bold mb-3"><i class="fa-solid fa-clock-rotate-left me-2 text-primary"></i>Attendance History (Last 100)</h6>
+            <div class="table-responsive" style="max-height: 300px;">
+              <table class="table table-sm table-hover align-middle">
+                <thead class="table-light sticky-top"><tr><th>Date</th><th>Program Name</th><th>Pillar</th></tr></thead>
+                <tbody id="member-history-body">
+                  <tr><td colspan="3" class="text-center py-4 text-muted">Loading history...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-light fw-bold" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary fw-bold px-4" onclick="saveMemberEdit()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Member Merge Modal -->
+  <div class="modal fade" id="memberMergeModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        <div class="modal-header bg-danger text-white border-0 rounded-top-4">
+          <h5 class="modal-title fw-bold"><i class="fa-solid fa-code-merge me-2"></i>Member Merge Tool</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4">
+          <div id="merge-step-1">
+            <div class="alert alert-warning border-0">
+              <i class="fa-solid fa-triangle-exclamation me-2"></i>Select the <b>Master Record</b> (the one to keep) and one or more <b>Duplicates</b> to merge.
+            </div>
+            <div class="row g-4">
+              <div class="col-md-6">
+                <label class="form-label fw-bold">1. Select Master (Keep)</label>
+                <div id="merge-master-list" class="list-group overflow-auto" style="max-height: 400px;"></div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-bold">2. Select Duplicates (Delete)</label>
+                <div id="merge-dup-list" class="list-group overflow-auto" style="max-height: 400px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div id="merge-step-2" class="d-none">
+            <div class="alert alert-info border-0">
+              <i class="fa-solid fa-circle-info me-2"></i>Conflict Resolution: Choose the correct value for each field.
+            </div>
+            <div id="merge-conflict-container" class="border rounded p-3 bg-light">
+              <!-- Dynamic conflict rows here -->
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-light fw-bold" id="btn-merge-back" onclick="showMergeStep(1)" style="display:none;">Back</button>
+          <button type="button" class="btn btn-light fw-bold" id="btn-merge-cancel" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary fw-bold px-4" id="btn-compare-merge" onclick="prepareMergeComparison()" disabled>Compare & Resolve</button>
+          <button type="button" class="btn btn-danger fw-bold px-4 d-none" id="btn-confirm-merge" onclick="confirmMerge()">Finalize Merge</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add/Edit Meeting Modal -->
+  <div class="modal fade" id="addMeetingModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        <div class="modal-header bg-primary text-white border-0 rounded-top-4">
+          <h5 class="modal-title fw-bold" id="meet-modal-title"><i class="fa-solid fa-calendar-plus me-2"></i>Schedule Meeting</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4">
+          <input type="hidden" id="meet-row">
+          <div class="row g-3">
+            <div class="col-12"><label class="form-label fw-bold small">Meeting Title</label><input type="text" id="meet-title" class="form-control" placeholder="e.g. Mesyuarat Bersama MCMC"></div>
+            <div class="col-md-6"><label class="form-label fw-bold small">Date</label><input type="date" id="meet-date" class="form-control"></div>
+            <div class="col-md-6"><label class="form-label fw-bold small">Time</label><input type="time" id="meet-time" class="form-control"></div>
+            <div class="col-12"><label class="form-label fw-bold small">Meeting Link (Optional)</label><input type="url" id="meet-link" class="form-control" placeholder="Zoom, Google Meet, etc."></div>
+            <div id="meet-extra-fields" class="d-none">
+              <div class="col-12 mt-3"><label class="form-label fw-bold small">Pax (Completed Only)</label><input type="number" id="meet-pax" class="form-control"></div>
+              <div class="col-12 mt-3"><label class="form-label fw-bold small">Remarks (Completed Only)</label><textarea id="meet-remarks" class="form-control" rows="2"></textarea></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-light fw-bold" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="meet-save-btn" class="btn btn-primary fw-bold px-4" onclick="saveMeeting()">Schedule</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Meeting Report Modal -->
+  <div class="modal fade" id="meetingReportModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        <div class="modal-header bg-success text-white border-0 rounded-top-4">
+          <h5 class="modal-title fw-bold"><i class="fa-solid fa-clipboard-check me-2"></i>Submit Meeting Report</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4">
+          <input type="hidden" id="report-meet-row">
+          <div class="row g-3">
+            <div class="col-12"><label class="form-label fw-bold small">Number of Participants</label><input type="number" id="report-meet-pax" class="form-control" placeholder="Total pax"></div>
+            <div class="col-12"><label class="form-label fw-bold small">Remarks (Optional)</label><textarea id="report-meet-remarks" class="form-control" rows="2" placeholder="Enter meeting highlights..."></textarea></div>
+            <div class="col-12">
+              <label class="form-label fw-bold small">Evidence Photos (Max 3)</label>
+              <div class="drop-zone" id="meet-dz" onclick="document.getElementById('meet-fi').click()">
+                <i class="fa-solid fa-camera fa-2x mb-2 text-muted"></i>
+                <p class="small text-muted m-0">Click or Drag 3 photos</p>
+                <input type="file" id="meet-fi" class="drop-zone-input" accept="image/*" multiple onchange="handleMeetImg(this.files)">
+              </div>
+              <div class="photo-preview mt-2" id="meet-pv"></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-light fw-bold" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-success fw-bold px-4" onclick="confirmMeetingReport()">Submit Report</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Health Record Modal -->
+  <div class="modal fade" id="screeningModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        <div class="modal-header bg-accent text-white border-0 rounded-top-4">
+          <h5 class="modal-title fw-bold"><i class="fa-solid fa-heart-pulse me-2"></i>Health Record Entry</h5>
+        </div>
+        <div class="modal-body p-4">
+          <input type="hidden" id="screening-current-id">
+          <div class="mb-4 text-center">
+            <div class="h5 fw-bold text-primary mb-0" id="screening-current-name">PARTICIPANT_NAME</div>
+            <div class="small text-muted">Health Record Assessment</div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label fw-bold small">Height (cm)</label>
+              <input type="number" id="sc-height" class="form-control" placeholder="e.g. 170" oninput="calcBMI()">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-bold small">Weight (kg)</label>
+              <input type="number" id="sc-weight" class="form-control" placeholder="e.g. 70" oninput="calcBMI()">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-bold small">BMI</label>
+              <div class="input-group">
+                <input type="text" id="sc-bmi" class="form-control fw-bold" readonly>
+                <span id="sc-bmi-badge" class="input-group-text small fw-bold">--</span>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-bold small">Systolic (mmHg)</label>
+              <input type="number" id="sc-sys" class="form-control" placeholder="e.g. 120">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-bold small">Diastolic (mmHg)</label>
+              <input type="number" id="sc-dia" class="form-control" placeholder="e.g. 80">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-bold small">Glucose (mmol/L)</label>
+              <input type="number" step="0.1" id="sc-glucose" class="form-control" placeholder="e.g. 5.5">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-bold small">SpO₂ (%)</label>
+              <input type="number" id="sc-spo2" class="form-control" placeholder="e.g. 98">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label fw-bold small">Remarks</label>
+              <input type="text" id="sc-remarks" class="form-control" placeholder="Additional notes...">
+            </div>
+          </div>
+
+          <div id="sc-reference" class="mt-4 p-3 bg-light rounded-3 border d-none">
+            <div class="small fw-bold text-muted text-uppercase mb-2"><i class="fa-solid fa-clock-rotate-left me-1"></i>Previous Record (Reference)</div>
+            <div id="sc-ref-content" class="row g-2 small">
+              <!-- Reference content injected here -->
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-light fw-bold" onclick="skipScreening()">Skip</button>
+          <button type="button" class="btn btn-primary fw-bold px-4" id="btn-save-screening" onclick="saveHealthRecord()">Save Health Record</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="draftSaveModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        <div class="modal-header bg-dark text-white border-0 rounded-top-4">
+          <h5 class="modal-title fw-bold"><i class="fa-solid fa-cloud-arrow-up me-2"></i>Save Draft to Cloud</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4">
+          <p class="text-muted small mb-3">Your progress will be saved securely to Google Drive. You can resume this session from any device.</p>
+          <label class="form-label fw-bold">Draft Name</label>
+          <input type="text" class="form-control form-control-lg" id="draft-name-input" placeholder="e.g. Kelas ICT Pagi">
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-light fw-bold" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary fw-bold px-4" onclick="confirmSaveDraft()">Save Draft</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Bottom Nav -->
+  <nav class="mobile-bottom-nav d-lg-none" id="mobile-bottom-nav">
+    <div class="mob-nav-item" id="mobt-prog" onclick="mobileNavProgram()">
+      <i class="fa-solid fa-pen-to-square"></i>
+      <span>Program</span>
+      <span id="nav-draft-badge-mob" class="mob-draft-dot d-none"></span>
+    </div>
+    <div class="mob-nav-item" id="mobt-dash" onclick="toggle('dash')">
+      <i class="fa-solid fa-chart-pie"></i>
+      <span>Dashboard</span>
+    </div>
+    <div class="mob-nav-item" id="mobt-rep" onclick="toggle('rep')">
+      <i class="fa-solid fa-file-lines"></i>
+      <span>Reports</span>
+    </div>
+    <div class="mob-nav-item" id="mobt-meet" onclick="toggle('meet')">
+      <i class="fa-solid fa-handshake"></i>
+      <span>Meetings</span>
+    </div>
+    <div class="mob-nav-item" id="mobt-mem" onclick="toggle('mem')">
+      <i class="fa-solid fa-users-gear"></i>
+      <span>Members</span>
+    </div>
+  </nav>
+
+  <!-- Program sub-sheet (slide-up) -->
+  <div class="prog-sheet-backdrop d-none" id="prog-sheet-backdrop" onclick="closeProgSheet()"></div>
+  <div class="prog-sheet d-none" id="prog-sheet">
+    <div class="prog-sheet-handle"></div>
+    <div class="prog-sheet-item" onclick="toggle('reg'); closeProgSheet()">
+      <i class="fa-solid fa-clipboard-check"></i> Register Session
+    </div>
+    <div class="prog-sheet-item" onclick="toggle('plan'); closeProgSheet()">
+      <i class="fa-solid fa-calendar-plus"></i> Planner
+    </div>
+    <div class="prog-sheet-item" onclick="toggle('drafts'); closeProgSheet()">
+      <i class="fa-solid fa-floppy-disk"></i> Drafts
+      <span id="nav-draft-badge-sheet" class="badge bg-danger rounded-pill ms-auto d-none" style="font-size:0.65rem;">Active</span>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <?!= include('JavaScript'); ?>
+</body>
+</html>
