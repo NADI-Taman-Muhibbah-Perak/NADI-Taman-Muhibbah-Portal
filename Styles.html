@@ -490,10 +490,13 @@
   [data-theme="dark"] .hud-progress { background: rgba(255,255,255,0.05); }
   .hud-progress-bar {
     height: 100%;
-    background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+    background-color: var(--primary-color);
     box-shadow: 0 0 10px var(--primary-color);
     transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
   }
+  .hud-progress-bar.bg-danger { background-color: var(--danger-color) !important; box-shadow: 0 0 10px var(--danger-color); }
+  .hud-progress-bar.bg-warning { background-color: var(--warning-color) !important; box-shadow: 0 0 10px var(--warning-color); }
+  .hud-progress-bar.bg-success { background-color: var(--success-color) !important; box-shadow: 0 0 10px var(--success-color); }
 
   .scanline-loader {
     width: 100%;
