@@ -1,7 +1,7 @@
 <script>
   let masterData = {}, memberRecords = [], photoData = {}, rawStats = [], meetingRecords = [], localScreeningData = {};
   let kpiSettings = { monthlyTarget: 1, quarterlyTarget: 3 };
-  let kpiChartInstance = null, yoyChartInstance = null, qoqChartInstance = null;
+  let kpiChartInstance = null, yoyChartInstance = null, qoqChartInstance = null, healthTrendChartInstance = null;
   let demoOccChart = null, demoEduChart = null, demoAgeChart = null;
   let plannerModalObj = null, draftModalObj = null, memberEditModalObj = null, memberMergeModalObj = null;
   let addMeetingModalObj = null, meetingReportModalObj = null, screeningModalObj = null;
@@ -2201,11 +2201,12 @@
     document.getElementById('screening-current-id').value = partId;
 
     const data = localScreeningData[partId] || {};
-    ['sc-height', 'sc-weight', 'sc-bmi', 'sc-sys', 'sc-dia', 'sc-glucose', 'sc-spo2', 'sc-remarks'].forEach(id => {
+    ['sc-height', 'sc-weight', 'sc-bmi', 'sc-sys', 'sc-dia', 'sc-pulse', 'sc-glucose', 'sc-spo2', 'sc-remarks'].forEach(id => {
       const key = id.replace('sc-', '').replace('sys', 'systolic').replace('dia', 'diastolic');
       document.getElementById(id).value = data[key] || '';
     });
     calcBMI();
+    ['sc-sys', 'sc-dia', 'sc-pulse', 'sc-glucose', 'sc-spo2'].forEach(id => checkAbnormal(id));
 
     document.getElementById('sc-reference').classList.add('d-none');
     google.script.run.withSuccessHandler(ref => {
@@ -2215,13 +2216,83 @@
           <div class="col-6">Date: <b>${ref.date}</b></div>
           <div class="col-6">BMI: <b>${ref.bmi} (${ref.category})</b></div>
           <div class="col-6">BP: <b>${ref.systolic}/${ref.diastolic}</b></div>
+          <div class="col-6">Pulse: <b>${ref.pulse || '-'}</b></div>
           <div class="col-6">Glucose: <b>${ref.glucose}</b></div>
           <div class="col-12 text-truncate">Remarks: <i>${ref.remarks || '-'}</i></div>
         `;
       }
     }).getLatestScreening(name);
 
+    if (healthTrendChartInstance) healthTrendChartInstance.destroy();
+    google.script.run.withSuccessHandler(history => {
+      drawHealthTrendChart(history);
+    }).getMemberScreeningHistory(name);
+
     screeningModalObj.show();
+  }
+
+  function drawHealthTrendChart(history) {
+    const ctx = document.getElementById('healthTrendChart').getContext('2d');
+    if (!history || history.length === 0) {
+      if (healthTrendChartInstance) healthTrendChartInstance.destroy();
+      return;
+    }
+
+    const labels = history.map(h => h.date);
+    const bmiData = history.map(h => parseFloat(h.bmi) || null);
+    const sysData = history.map(h => parseFloat(h.systolic) || null);
+    const diaData = history.map(h => parseFloat(h.diastolic) || null);
+
+    const theme = document.documentElement.getAttribute('data-theme');
+    const textColor = theme === 'dark' ? '#f1f5f9' : '#1e293b';
+
+    healthTrendChartInstance = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'BMI', data: bmiData, borderColor: '#0ea5e9', tension: 0.3, yAxisID: 'y' },
+          { label: 'Systolic', data: sysData, borderColor: '#ef4444', tension: 0.3, yAxisID: 'y1' },
+          { label: 'Diastolic', data: diaData, borderColor: '#f59e0b', tension: 0.3, yAxisID: 'y1' }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: textColor, font: { size: 10 } } } },
+        scales: {
+          x: { ticks: { color: textColor, font: { size: 9 } } },
+          y: {
+            type: 'linear', display: true, position: 'left', title: { display: true, text: 'BMI', color: textColor },
+            ticks: { color: textColor }
+          },
+          y1: {
+            type: 'linear', display: true, position: 'right', title: { display: true, text: 'BP (mmHg)', color: textColor },
+            ticks: { color: textColor }, grid: { drawOnChartArea: false }
+          }
+        }
+      }
+    });
+  }
+
+  function checkAbnormal(id) {
+    const val = parseFloat(document.getElementById(id).value);
+    const flag = document.getElementById(id + '-flag');
+    if (!flag) return;
+
+    let abnormal = false;
+    if (isNaN(val)) { flag.classList.add('d-none'); return; }
+
+    switch (id) {
+      case 'sc-sys': abnormal = (val > 140); break;
+      case 'sc-dia': abnormal = (val > 90); break;
+      case 'sc-pulse': abnormal = (val < 60 || val > 100); break;
+      case 'sc-glucose': abnormal = (val > 7.0); break; // Fasting
+      case 'sc-spo2': abnormal = (val < 95); break;
+    }
+
+    if (abnormal) flag.classList.remove('d-none');
+    else flag.classList.add('d-none');
   }
 
   function saveHealthRecord() {
@@ -2238,6 +2309,7 @@
       category: document.getElementById('sc-bmi-badge').innerText,
       systolic: document.getElementById('sc-sys').value,
       diastolic: document.getElementById('sc-dia').value,
+      pulse: document.getElementById('sc-pulse').value,
       glucose: document.getElementById('sc-glucose').value,
       spo2: document.getElementById('sc-spo2').value,
       remarks: document.getElementById('sc-remarks').value

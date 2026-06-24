@@ -120,7 +120,13 @@ function ensureScreeningSheet_() {
   let sheet = ss.getSheetByName('Screening');
   if (!sheet) sheet = ss.insertSheet('Screening');
   if (sheet.getLastRow() === 0) {
-    sheet.appendRow(['Timestamp', 'Date', 'Name', 'IC', 'Height', 'Weight', 'BMI', 'Category', 'Systolic', 'Diastolic', 'Glucose', 'SpO2', 'Remarks']);
+    sheet.appendRow(['Timestamp', 'Date', 'Name', 'IC', 'Height', 'Weight', 'BMI', 'Category', 'Systolic', 'Diastolic', 'Pulse', 'Glucose', 'SpO2', 'Remarks']);
+  } else {
+    const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    if (header.indexOf('Pulse') === -1) {
+      sheet.insertColumnAfter(10);
+      sheet.getRange(1, 11).setValue('Pulse');
+    }
   }
   return sheet;
 }
@@ -947,13 +953,44 @@ function getLatestScreening(name) {
         category: data[i][7],
         systolic: data[i][8],
         diastolic: data[i][9],
-        glucose: data[i][10],
-        spo2: data[i][11],
-        remarks: data[i][12]
+        pulse: data[i][10],
+        glucose: data[i][11],
+        spo2: data[i][12],
+        remarks: data[i][13]
       };
     }
   }
   return null;
+}
+
+function getMemberScreeningHistory(name) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Screening');
+  if (!sheet) return [];
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+
+  const targetName = normalizeName_(name);
+  const history = [];
+
+  for (let i = 1; i < data.length; i++) {
+    if (normalizeName_(data[i][2]) === targetName) {
+      history.push({
+        date: formatDateStr(data[i][1]),
+        height: data[i][4],
+        weight: data[i][5],
+        bmi: data[i][6],
+        category: data[i][7],
+        systolic: data[i][8],
+        diastolic: data[i][9],
+        pulse: data[i][10],
+        glucose: data[i][11],
+        spo2: data[i][12],
+        remarks: data[i][13]
+      });
+    }
+  }
+  return history;
 }
 
 function saveScreeningRecords(records) {
@@ -972,6 +1009,7 @@ function saveScreeningRecords(records) {
     r.category || '',
     r.systolic || '',
     r.diastolic || '',
+    r.pulse || '',
     r.glucose || '',
     r.spo2 || '',
     r.remarks || ''
