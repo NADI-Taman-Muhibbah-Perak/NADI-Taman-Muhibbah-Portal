@@ -1,5 +1,7 @@
 <script>
   let masterData = {}, memberRecords = [], photoData = {}, rawStats = [], meetingRecords = [], localScreeningData = {};
+  let memberAttendanceMap = {}; // Indexed by IC: { count: 0, lastDate: DateObj }
+  let latestSessionDate = null;
   let kpiSettings = { monthlyTarget: 1, quarterlyTarget: 3 };
   let kpiChartInstance = null, yoyChartInstance = null, qoqChartInstance = null, healthTrendChartInstance = null;
   let demoOccChart = null, demoEduChart = null, demoAgeChart = null;
@@ -17,7 +19,18 @@
 
   function formatLocalDateInput(dateObj) {
     if (!dateObj) return '';
-    const d = new Date(dateObj);
+    let d;
+    if (typeof dateObj === 'string' && dateObj.includes('-')) {
+      const parts = dateObj.split('-');
+      if (parts[0].length === 4) { // YYYY-MM-DD
+        d = new Date(dateObj);
+      } else { // DD-MM-YYYY
+        d = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+      }
+    } else {
+      d = new Date(dateObj);
+    }
+    if (isNaN(d.getTime())) return '';
     const year = d.getFullYear();
     const month = ('0' + (d.getMonth() + 1)).slice(-2);
     const day = ('0' + d.getDate()).slice(-2);
@@ -203,7 +216,14 @@
     if (tab === 'plan') fetchPlannerData();
     if (tab === 'dash' || tab === 'rep') fetchStats();
     if (tab === 'drafts') renderDraftList();
-    if (tab === 'mem') renderMemberList();
+    if (tab === 'mem') {
+      if (rawStats.length === 0) {
+        fetchStats(() => renderMemberList());
+      } else {
+        calculateMemberAttendance();
+        renderMemberList();
+      }
+    }
     if (tab === 'meet') fetchMeetingData();
 
     syncMobileNav(tab);
@@ -639,21 +659,54 @@
     }
 
     container.innerHTML = filtered.map(m => {
-      const isComplete = m.occupation && m.education && m.age;
-      const statusDot = isComplete ? '' : '<i class="fa-solid fa-circle text-secondary opacity-25 ms-2" style="font-size: 0.5rem;" title="Incomplete Profile"></i>';
+      const fields = [m.ic, m.mobile, m.email, m.race, m.occupation, m.education, m.dob];
+      const completedFields = fields.filter(f => f && f !== 'N/A' && f !== '-' && String(f).trim() !== '').length;
+      const completeness = Math.round((completedFields / fields.length) * 100);
+      const progressClass = completeness < 50 ? 'bg-danger' : (completeness < 80 ? 'bg-warning' : 'bg-success');
+
+      const cleanIc = String(m.ic || '').trim().replace(/-/g, '');
+      const attendance = memberAttendanceMap[cleanIc] || { count: 0, lastDate: null };
+
+      let isInactive = false;
+      if (latestSessionDate) {
+        if (attendance.lastDate) {
+          const diffDays = (latestSessionDate - attendance.lastDate) / (1000 * 60 * 60 * 24);
+          if (diffDays >= 90) isInactive = true;
+        } else {
+          isInactive = true; // Never attended
+        }
+      }
+
+      const inactiveIcon = isInactive ? '<i class="fa-solid fa-ghost text-warning ms-2" title="Long time no see (Inactive > 90 days)"></i>' : '';
+
       return `
       <div class="col-md-6 col-xl-4">
         <div class="nadi-card h-100 p-3 mb-0 d-flex flex-column">
-          <div class="d-flex justify-content-between align-items-start mb-2">
-            <div class="fw-bold text-dark fs-5 text-truncate" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}${statusDot}</div>
+          <div class="d-flex justify-content-between align-items-start mb-1">
+            <div class="fw-bold text-dark fs-5 text-truncate" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}${inactiveIcon}</div>
             <button class="btn btn-sm btn-outline-primary" onclick="showEditMemberModal(${m.row})"><i class="fa-solid fa-pen-to-square"></i></button>
           </div>
-          <div class="small text-muted mb-3 font-monospace"><i class="fa-regular fa-id-card me-1"></i>${escapeHtml(m.ic)}</div>
+          <div class="small text-muted mb-2 font-monospace"><i class="fa-regular fa-id-card me-1"></i>${escapeHtml(m.ic)}</div>
+
+          <div class="mb-3">
+             <div class="d-flex justify-content-between small mb-1">
+                <span class="text-muted small">Profile Completion</span>
+                <span class="fw-bold">${completeness}%</span>
+             </div>
+             <div class="hud-progress">
+                <div class="hud-progress-bar ${progressClass}" style="width: ${completeness}%"></div>
+             </div>
+          </div>
+
           <div class="small mb-1"><i class="fa-solid fa-phone me-2 text-primary opacity-50"></i>${escapeHtml(m.mobile || 'N/A')}</div>
-          <div class="small mb-3 text-truncate"><i class="fa-solid fa-envelope me-2 text-primary opacity-50"></i>${escapeHtml(m.email || 'N/A')}</div>
-          <div class="mt-auto pt-2 border-top d-flex justify-content-between align-items-center">
-            <span class="badge bg-light text-dark border small">${escapeHtml(m.occupation || 'N/A')}</span>
-            <span class="small text-muted">Joined: ${m.dateJoin}</span>
+          <div class="small mb-2 text-truncate"><i class="fa-solid fa-envelope me-2 text-primary opacity-50"></i>${escapeHtml(m.email || 'N/A')}</div>
+
+          <div class="mt-auto pt-2 border-top">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+               <span class="badge bg-light text-dark border small"><i class="fa-solid fa-calendar-check me-1 text-success"></i>Sessions: ${attendance.count}</span>
+               <span class="small text-muted">Joined: ${m.dateJoin}</span>
+            </div>
+            <div class="small text-muted text-truncate"><i class="fa-solid fa-briefcase me-1 opacity-50"></i>${escapeHtml(m.occupation || 'N/A')}</div>
           </div>
         </div>
       </div>`;
@@ -702,9 +755,31 @@
     document.getElementById('edit-mem-sal').value = m.salary;
     document.getElementById('edit-mem-edu').value = m.education;
     document.getElementById('edit-mem-dist').value = m.distance;
-    document.getElementById('edit-mem-join').value = m.dateJoin;
+    document.getElementById('edit-mem-join').value = formatLocalDateInput(m.dateJoin);
     document.getElementById('edit-mem-age').value = m.age;
-    document.getElementById('edit-mem-dob').value = m.dob;
+    document.getElementById('edit-mem-dob').value = formatLocalDateInput(m.dob);
+
+    const icInput = document.getElementById('edit-mem-ic');
+    icInput.oninput = () => {
+      const ic = icInput.value.replace(/-/g, '').trim();
+      if (ic.length >= 6) {
+        let yearPart = ic.substring(0, 2);
+        let monthPart = ic.substring(2, 4);
+        let dayPart = ic.substring(4, 6);
+
+        const currentYear = new Date().getFullYear();
+        const currentYearLastTwo = currentYear % 100;
+        let fullYear = (parseInt(yearPart) <= currentYearLastTwo) ? (2000 + parseInt(yearPart)) : (1900 + parseInt(yearPart));
+
+        const dob = `${fullYear}-${monthPart}-${dayPart}`;
+        const dobDate = new Date(dob);
+        if (!isNaN(dobDate.getTime())) {
+           document.getElementById('edit-mem-dob').value = dob;
+           let age = currentYear - fullYear;
+           document.getElementById('edit-mem-age').value = age;
+        }
+      }
+    };
 
     if (!memberEditModalObj) memberEditModalObj = new bootstrap.Modal(document.getElementById('memberEditModal'));
     memberEditModalObj.show();
@@ -712,6 +787,15 @@
 
   function saveMemberEdit() {
     const row = document.getElementById('edit-mem-row').value;
+    const rawJoin = document.getElementById('edit-mem-join').value;
+    const rawDob = document.getElementById('edit-mem-dob').value;
+
+    const formatDateForGas = (isoDate) => {
+      if (!isoDate) return '';
+      const parts = isoDate.split('-');
+      return `${parts[2]}-${parts[1]}-${parts[0]}`; // DD-MM-YYYY
+    };
+
     const data = {
       name: document.getElementById('edit-mem-name').value,
       ic: document.getElementById('edit-mem-ic').value,
@@ -723,9 +807,9 @@
       salary: document.getElementById('edit-mem-sal').value,
       education: document.getElementById('edit-mem-edu').value,
       distance: document.getElementById('edit-mem-dist').value,
-      dateJoin: document.getElementById('edit-mem-join').value,
+      dateJoin: formatDateForGas(rawJoin),
       age: document.getElementById('edit-mem-age').value,
-      dob: document.getElementById('edit-mem-dob').value
+      dob: formatDateForGas(rawDob)
     };
 
     const btn = document.querySelector('#memberEditModal .btn-primary');
@@ -1456,12 +1540,37 @@
   }
 
   // --- Dashboard & Stats ---
-  function fetchStats() {
+  function calculateMemberAttendance() {
+    memberAttendanceMap = {};
+    latestSessionDate = null;
+
+    rawStats.filter(s => s.status === 'COMPLETED').forEach(s => {
+      const ic = String(s.partIc || '').trim().replace(/-/g, '');
+      if (!ic || ic === 'N/A') return;
+
+      const sessionDate = s.date ? new Date(s.date.split('-').reverse().join('-')) : null;
+      if (sessionDate && (!latestSessionDate || sessionDate > latestSessionDate)) {
+        latestSessionDate = sessionDate;
+      }
+
+      if (!memberAttendanceMap[ic]) {
+        memberAttendanceMap[ic] = { count: 0, lastDate: null };
+      }
+      memberAttendanceMap[ic].count++;
+      if (sessionDate && (!memberAttendanceMap[ic].lastDate || sessionDate > memberAttendanceMap[ic].lastDate)) {
+        memberAttendanceMap[ic].lastDate = sessionDate;
+      }
+    });
+  }
+
+  function fetchStats(callback) {
     google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
       rawStats = res || [];
+      calculateMemberAttendance();
       populateYearDropdown();
       drawStats();
       drawReports();
+      if (callback) callback();
     }).getDashboardStats();
   }
 
@@ -2475,6 +2584,7 @@
     updateActiveDraftBadge();
     loadNotifSettings();
     loadKPISettings();
+    fetchStats(); // Fetch stats early for deduplication
     setInterval(() => { persistWorkingState(false); }, 7000);
     toggle('reg');
   }
