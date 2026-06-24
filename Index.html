@@ -598,20 +598,39 @@
               </div>
             </div>
             <div class="col-md-4">
-              <label class="form-label fw-bold small">Systolic (mmHg)</label>
-              <input type="number" id="sc-sys" class="form-control" placeholder="e.g. 120">
+              <label class="form-label fw-bold small d-flex justify-content-between align-items-center">
+                Systolic (mmHg)
+                <span id="sc-sys-flag" class="badge bg-danger d-none abnormal-flag">Abnormal</span>
+              </label>
+              <input type="number" id="sc-sys" class="form-control" placeholder="e.g. 120" oninput="checkAbnormal('sc-sys')">
             </div>
             <div class="col-md-4">
-              <label class="form-label fw-bold small">Diastolic (mmHg)</label>
-              <input type="number" id="sc-dia" class="form-control" placeholder="e.g. 80">
+              <label class="form-label fw-bold small d-flex justify-content-between align-items-center">
+                Diastolic (mmHg)
+                <span id="sc-dia-flag" class="badge bg-danger d-none abnormal-flag">Abnormal</span>
+              </label>
+              <input type="number" id="sc-dia" class="form-control" placeholder="e.g. 80" oninput="checkAbnormal('sc-dia')">
             </div>
             <div class="col-md-4">
-              <label class="form-label fw-bold small">Glucose (mmol/L)</label>
-              <input type="number" step="0.1" id="sc-glucose" class="form-control" placeholder="e.g. 5.5">
+              <label class="form-label fw-bold small d-flex justify-content-between align-items-center">
+                Pulse (bpm)
+                <span id="sc-pulse-flag" class="badge bg-danger d-none abnormal-flag">Abnormal</span>
+              </label>
+              <input type="number" id="sc-pulse" class="form-control" placeholder="60-100" oninput="checkAbnormal('sc-pulse')">
             </div>
             <div class="col-md-4">
-              <label class="form-label fw-bold small">SpO₂ (%)</label>
-              <input type="number" id="sc-spo2" class="form-control" placeholder="e.g. 98">
+              <label class="form-label fw-bold small d-flex justify-content-between align-items-center">
+                Glucose (mmol/L)
+                <span id="sc-glucose-flag" class="badge bg-danger d-none abnormal-flag">Abnormal</span>
+              </label>
+              <input type="number" step="0.1" id="sc-glucose" class="form-control" placeholder="Fasting" oninput="checkAbnormal('sc-glucose')">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-bold small d-flex justify-content-between align-items-center">
+                SpO₂ (%)
+                <span id="sc-spo2-flag" class="badge bg-danger d-none abnormal-flag">Low</span>
+              </label>
+              <input type="number" id="sc-spo2" class="form-control" placeholder="95-100" oninput="checkAbnormal('sc-spo2')">
             </div>
             <div class="col-md-8">
               <label class="form-label fw-bold small">Remarks</label>
@@ -623,6 +642,13 @@
             <div class="small fw-bold text-muted text-uppercase mb-2"><i class="fa-solid fa-clock-rotate-left me-1"></i>Previous Record (Reference)</div>
             <div id="sc-ref-content" class="row g-2 small">
               <!-- Reference content injected here -->
+            </div>
+          </div>
+
+          <div class="mt-4 pt-3 border-top">
+            <div class="small fw-bold text-muted text-uppercase mb-3"><i class="fa-solid fa-chart-line me-1"></i>Health Trend (BMI & BP)</div>
+            <div style="height: 250px; position: relative;">
+              <canvas id="healthTrendChart"></canvas>
             </div>
           </div>
         </div>
