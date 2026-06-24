@@ -38,6 +38,7 @@
           <a class="nav-link" id="tab-mem" href="#" onclick="toggle('mem')"><i class="fa-solid fa-users-gear me-1"></i>Members</a>
           <a class="nav-link" id="tab-meet" href="#" onclick="toggle('meet')"><i class="fa-solid fa-handshake me-1"></i>Meetings</a>
           <a class="nav-link" id="tab-drafts" href="#" onclick="toggle('drafts')"><i class="fa-solid fa-floppy-disk me-1"></i>Drafts <span id="nav-draft-badge" class="badge bg-danger rounded-pill ms-1 d-none" style="font-size:0.65rem;">Active</span></a>
+          <a class="nav-link" id="tab-settings" href="#" data-bs-toggle="offcanvas" data-bs-target="#settingsSidebar"><i class="fa-solid fa-gear me-1"></i>Settings</a>
           <div class="theme-toggle ms-lg-3 d-none d-lg-flex" onclick="toggleTheme()" title="Toggle Theme" role="button" aria-label="Toggle dark mode" tabindex="0">
             <i id="theme-icon" class="fa-solid fa-moon"></i>
           </div>
@@ -304,7 +305,13 @@
               <option value="8">September</option><option value="9">October</option><option value="10">November</option><option value="11">December</option>
             </select>
           </div>
-          <div class="col-md-3 text-end d-flex gap-2">
+          <div class="col-md-3 text-end d-flex gap-2 align-items-center">
+            <div class="btn-group shadow-sm me-2" role="group" aria-label="View Toggle">
+              <input type="radio" class="btn-check" name="rep-view-mode" id="rep-view-list" checked onclick="drawReports()">
+              <label class="btn btn-outline-secondary px-3" for="rep-view-list" title="List View"><i class="fa-solid fa-list"></i></label>
+              <input type="radio" class="btn-check" name="rep-view-mode" id="rep-view-gallery" onclick="drawReports()">
+              <label class="btn btn-outline-secondary px-3" for="rep-view-gallery" title="Gallery View"><i class="fa-solid fa-table-cells"></i></label>
+            </div>
             <button class="btn btn-light shadow-sm border" onclick="printReport()" title="Print Report"><i class="fa-solid fa-print"></i></button>
             <button class="btn btn-export shadow-sm w-100" onclick="exportToCSV()"><i class="fa-solid fa-file-export me-2"></i>Export to CSV</button>
           </div>
@@ -671,6 +678,56 @@
       <span>Members</span>
     </div>
   </nav>
+
+  <!-- Settings Sidebar (Offcanvas) -->
+  <div class="offcanvas offcanvas-end" tabindex="-1" id="settingsSidebar" aria-labelledby="settingsSidebarLabel">
+    <div class="offcanvas-header bg-primary text-white">
+      <h5 class="offcanvas-title fw-bold" id="settingsSidebarLabel"><i class="fa-solid fa-gears me-2"></i>System Settings</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body">
+      <div class="mb-4">
+        <h6 class="fw-bold text-uppercase small text-muted mb-3">Annual KPI Targets</h6>
+        <div class="nadi-card p-3 border-0 shadow-sm bg-light">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Monthly Target (per Module)</label>
+            <div class="input-group">
+              <input type="number" id="cfg-monthly-target" class="form-control" min="1" value="1">
+              <span class="input-group-text">sessions</span>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Quarterly Target (per Module)</label>
+            <div class="input-group">
+              <input type="number" id="cfg-quarterly-target" class="form-control" min="1" value="3">
+              <span class="input-group-text">sessions</span>
+            </div>
+          </div>
+          <button class="btn btn-primary w-100" onclick="updateKPISettings()">Update KPI Targets</button>
+        </div>
+        <p class="small text-muted"><i class="fa-solid fa-circle-info me-1"></i>Pooled and Awareness KPIs remain hardcoded to 1/month and 3/quarter.</p>
+      </div>
+
+      <hr class="my-4">
+
+      <div class="mb-4">
+        <h6 class="fw-bold text-uppercase small text-muted mb-3">Email Notifications</h6>
+        <div class="nadi-card p-3 border-0 shadow-sm bg-light">
+          <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" id="notif-enabled-side" onchange="syncNotifSettings('side')">
+            <label class="form-check-label fw-bold" for="notif-enabled-side">Daily Reminder Digest</label>
+          </div>
+          <div id="notif-details-side" class="d-none">
+            <label class="form-label small fw-bold">Recipient Email</label>
+            <div class="input-group">
+              <input type="email" id="notif-email-side" class="form-control" placeholder="staff@gmail.com">
+              <button class="btn btn-sm btn-primary" onclick="updateNotifSettings('side')">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Program sub-sheet (slide-up) -->
   <div class="prog-sheet-backdrop d-none" id="prog-sheet-backdrop" onclick="closeProgSheet()"></div>

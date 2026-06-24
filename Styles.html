@@ -536,6 +536,57 @@
     box-shadow: 0 0 20px rgba(37, 99, 235, 0.2) !important;
   }
 
+  /* Masonry Gallery Styles */
+  .masonry-grid {
+    columns: 1;
+    column-gap: 1.5rem;
+    width: 100%;
+  }
+  @media (min-width: 576px) { .masonry-grid { columns: 2; } }
+  @media (min-width: 992px) { .masonry-grid { columns: 3; } }
+  @media (min-width: 1400px) { .masonry-grid { columns: 4; } }
+
+  .masonry-item {
+    break-inside: avoid;
+    margin-bottom: 1.5rem;
+    display: block;
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    text-decoration: none;
+    color: inherit;
+  }
+  .masonry-item:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 15px rgba(0,0,0,0.1);
+    color: inherit;
+  }
+  .masonry-img {
+    width: 100%;
+    height: auto;
+    display: block;
+    aspect-ratio: 4/3;
+    object-fit: cover;
+    background: var(--bg-light);
+  }
+  .masonry-info {
+    padding: 12px;
+  }
+  .masonry-title {
+    font-weight: 700;
+    font-size: 0.9rem;
+    margin-bottom: 4px;
+    display: block;
+    line-height: 1.2;
+  }
+  .masonry-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+
   /* Print Styles */
   @media print {
     .mobile-bottom-nav, .navbar, .btn, .theme-toggle, select, .input-group, .prog-sheet-backdrop, .prog-sheet, .alert, .overlay { display: none !important; }

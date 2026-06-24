@@ -1,5 +1,6 @@
 <script>
   let masterData = {}, memberRecords = [], photoData = {}, rawStats = [], meetingRecords = [], localScreeningData = {};
+  let kpiSettings = { monthlyTarget: 1, quarterlyTarget: 3 };
   let kpiChartInstance = null, yoyChartInstance = null, qoqChartInstance = null;
   let demoOccChart = null, demoEduChart = null, demoAgeChart = null;
   let plannerModalObj = null, draftModalObj = null, memberEditModalObj = null, memberMergeModalObj = null;
@@ -1223,11 +1224,45 @@
       openSingleScreening(id);
     }
 
+    // Participant Deduplication Check
+    if (val && !isRestoring) {
+      const ic = found ? found.ic : (nb && nb.querySelector('.n-ic') ? nb.querySelector('.n-ic').value : '');
+      if (ic) {
+        checkDuplicateAttendance(val, ic);
+      }
+    }
+
     persistWorkingState(false);
+  }
+
+  function checkDuplicateAttendance(name, ic) {
+    if (!ic) return;
+    const activeProgs = Array.from(document.querySelectorAll('#prog-container .p-name')).map(inp => inp.value.toUpperCase().trim()).filter(Boolean);
+    if (activeProgs.length === 0) return;
+
+    activeProgs.forEach(progName => {
+      const alreadyAttended = rawStats.some(s =>
+        s.status === 'COMPLETED' &&
+        normalizeName_(s.partName) === normalizeName_(name) &&
+        String(s.partIc || '').replace(/-/g, '') === String(ic || '').replace(/-/g, '') &&
+        normalizeName_(s.progName) === normalizeName_(progName)
+      );
+
+      if (alreadyAttended) {
+        showToast(`Warning: ${name} has already attended "${progName}" in a previous session.`, 'warning');
+      }
+    });
   }
 
   function calc(inp) {
     let ic = inp.value.replace(/[^0-9]/g, '');
+    if (ic.length >= 12) {
+      const card = inp.closest('.nadi-card');
+      const nameInp = card.querySelector('.p-name-in');
+      if (nameInp && nameInp.value) {
+        checkDuplicateAttendance(nameInp.value, ic);
+      }
+    }
     if(ic.length >= 6) {
       let yr = parseInt(ic.substring(0,2), 10);
       let mo = parseInt(ic.substring(2,4), 10) - 1;
@@ -1540,6 +1575,10 @@
     let monthlyAchievedCount = 0, quarterlyAchievedCount = 0;
 
     kpis.forEach(kpi => {
+      // Dynamic targets for non-pooled/non-special awareness KPIs
+      const mTarget = (kpi.pooled || kpi.specialAwareness) ? 1 : kpiSettings.monthlyTarget;
+      const qTarget = (kpi.pooled || kpi.specialAwareness) ? 3 : kpiSettings.quarterlyTarget;
+
       // Filter data for this KPI
       const kpiData = rawStats.filter(s => s.status === 'COMPLETED' && s.year === yr && (
         (kpi.pooled && kpi.pillar === 'Government Initiative' && s.pillar === kpi.pillar) ||
@@ -1562,7 +1601,7 @@
         const grouped = aggregateProgramRows(monthlyData);
         monthlyCount = kpi.sessionBased ? grouped.reduce((sum, g) => sum + g.sessionCount, 0) : grouped.length;
       }
-      const monthlyAchieved = monthlyCount >= 1;
+      const monthlyAchieved = monthlyCount >= mTarget;
       if (monthlyAchieved) monthlyAchievedCount++;
 
       // Quarterly Progress
@@ -1580,7 +1619,7 @@
         const grouped = aggregateProgramRows(quarterlyData);
         quarterlyCount = kpi.sessionBased ? grouped.reduce((sum, g) => sum + g.sessionCount, 0) : grouped.length;
       }
-      const quarterlyAchieved = quarterlyCount >= 3;
+      const quarterlyAchieved = quarterlyCount >= qTarget;
       if (quarterlyAchieved) quarterlyAchievedCount++;
 
       // UI Rendering
@@ -1594,12 +1633,12 @@
             <div class="small text-muted">${escapeHtml(kpi.pillar)}</div>
           </td>
           <td class="text-center">
-            <div class="fw-bold">${monthlyCount} / 1</div>
-            <div class="hud-progress"><div class="hud-progress-bar" style="width: ${Math.min(100, monthlyCount*100)}%"></div></div>
+            <div class="fw-bold">${monthlyCount} / ${mTarget}</div>
+            <div class="hud-progress"><div class="hud-progress-bar" style="width: ${Math.min(100, (monthlyCount/mTarget)*100)}%"></div></div>
           </td>
           <td class="text-center">
-            <div class="fw-bold">${quarterlyCount} / 3</div>
-            <div class="hud-progress"><div class="hud-progress-bar" style="width: ${Math.min(100, (quarterlyCount/3)*100)}%"></div></div>
+            <div class="fw-bold">${quarterlyCount} / ${qTarget}</div>
+            <div class="hud-progress"><div class="hud-progress-bar" style="width: ${Math.min(100, (quarterlyCount/qTarget)*100)}%"></div></div>
           </td>
           <td class="text-center">${statusBadge}</td>
         </tr>`;
@@ -1634,10 +1673,10 @@
           <div class="nadi-card p-3 h-100 achievement-card">
             <div class="small text-uppercase fw-bold text-muted mb-1">${escapeHtml(kpi.pillar)}</div>
             <div class="fw-bold text-dark mb-3 text-truncate" title="${escapeHtml(kpi.label)}">${escapeHtml(kpi.label)}</div>
-            <div class="d-flex justify-content-between small mb-1"><span>Monthly</span><span class="fw-bold">${monthlyCount}/1</span></div>
-            <div class="hud-progress mb-3"><div class="hud-progress-bar bg-${statusColor}" style="width: ${Math.min(100, monthlyCount*100)}%"></div></div>
-            <div class="d-flex justify-content-between small mb-1"><span>Quarterly</span><span class="fw-bold">${quarterlyCount}/3</span></div>
-            <div class="hud-progress"><div class="hud-progress-bar" style="width: ${Math.min(100, (quarterlyCount/3)*100)}%"></div></div>
+            <div class="d-flex justify-content-between small mb-1"><span>Monthly</span><span class="fw-bold">${monthlyCount}/${mTarget}</span></div>
+            <div class="hud-progress mb-3"><div class="hud-progress-bar bg-${statusColor}" style="width: ${Math.min(100, (monthlyCount/mTarget)*100)}%"></div></div>
+            <div class="d-flex justify-content-between small mb-1"><span>Quarterly</span><span class="fw-bold">${quarterlyCount}/${qTarget}</span></div>
+            <div class="hud-progress"><div class="hud-progress-bar" style="width: ${Math.min(100, (quarterlyCount/qTarget)*100)}%"></div></div>
             ${paxHtml}
           </div>
         </div>`;
@@ -1922,8 +1961,42 @@
     }
     const pF = document.getElementById('r-pillar').value;
     const mF = document.getElementById('r-month').value;
+    const isGallery = document.getElementById('rep-view-gallery').checked;
+
     const filtered = rawStats.filter(s => (!pF || s.pillar === pF) && (mF === '' || s.month === parseInt(mF, 10)) && s.status === 'COMPLETED');
     const grouped = aggregateProgramRows(filtered);
+
+    if (isGallery) {
+      renderReportGallery(grouped);
+    } else {
+      renderReportList(grouped);
+    }
+  }
+
+  function renderReportGallery(grouped) {
+    let html = '<div class="masonry-grid">';
+    grouped.forEach(g => {
+      g.sessions.forEach(sesh => {
+        if (sesh.picUrl) {
+          html += `
+            <a href="${sesh.picUrl}" target="_blank" class="masonry-item">
+              <img src="${sesh.picUrl}" class="masonry-img" loading="lazy">
+              <div class="masonry-info">
+                <span class="masonry-title">${escapeHtml(g.progName)}</span>
+                <div class="masonry-meta d-flex justify-content-between">
+                  <span>${sesh.date}</span>
+                  <span>${sesh.paxCount} Pax</span>
+                </div>
+              </div>
+            </a>`;
+        }
+      });
+    });
+    html += '</div>';
+    document.getElementById('report-container').innerHTML = (html === '<div class="masonry-grid"></div>') ? '<div class="text-center py-5 text-muted fs-5"><i class="fa-solid fa-image fs-1 mb-3 d-block opacity-25"></i>No photos found for this filter.</div>' : html;
+  }
+
+  function renderReportList(grouped) {
     let tree = {};
     grouped.forEach(g => {
       if(!tree[g.module]) tree[g.module] = {};
@@ -2248,13 +2321,65 @@
     }
   }
 
+  function updateKPISettings() {
+    const monthlyTarget = parseInt(document.getElementById('cfg-monthly-target').value, 10);
+    const quarterlyTarget = parseInt(document.getElementById('cfg-quarterly-target').value, 10);
+    if (isNaN(monthlyTarget) || isNaN(quarterlyTarget)) return showToast("Targets must be numbers.", "warning");
+
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
+      if (res.status === 'SUCCESS') {
+        kpiSettings = { monthlyTarget, quarterlyTarget };
+        showToast("KPI settings updated");
+        drawStats();
+      }
+    }).saveKPISettings({ monthlyTarget, quarterlyTarget });
+  }
+
+  function loadKPISettings() {
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(settings => {
+      if (settings) {
+        kpiSettings = settings;
+        document.getElementById('cfg-monthly-target').value = settings.monthlyTarget;
+        document.getElementById('cfg-quarterly-target').value = settings.quarterlyTarget;
+      }
+    }).getKPISettings();
+  }
+
   function saveNotifSettings() {
     const enabled = document.getElementById('notif-enabled').checked;
     const email = document.getElementById('notif-email').value;
     document.getElementById('notif-details').classList.toggle('d-none', !enabled);
+    syncNotifSettings('main');
 
     google.script.run.withFailureHandler(handleApiError).withSuccessHandler(() => {
       showToast('Notification settings updated');
+    }).setNotifSettings({ enabled, email });
+  }
+
+  function syncNotifSettings(source) {
+    const mainE = document.getElementById('notif-enabled');
+    const mainM = document.getElementById('notif-email');
+    const sideE = document.getElementById('notif-enabled-side');
+    const sideM = document.getElementById('notif-email-side');
+
+    if (source === 'main') {
+      sideE.checked = mainE.checked;
+      sideM.value = mainM.value;
+    } else {
+      mainE.checked = sideE.checked;
+      mainM.value = sideM.value;
+    }
+    document.getElementById('notif-details').classList.toggle('d-none', !mainE.checked);
+    document.getElementById('notif-details-side').classList.toggle('d-none', !sideE.checked);
+  }
+
+  function updateNotifSettings(source) {
+    const enabled = (source === 'main' ? document.getElementById('notif-enabled') : document.getElementById('notif-enabled-side')).checked;
+    const email = (source === 'main' ? document.getElementById('notif-email') : document.getElementById('notif-email-side')).value;
+
+    google.script.run.withFailureHandler(handleApiError).withSuccessHandler(() => {
+      showToast('Notification settings updated');
+      loadNotifSettings();
     }).setNotifSettings({ enabled, email });
   }
 
@@ -2264,6 +2389,10 @@
         document.getElementById('notif-enabled').checked = settings.enabled;
         document.getElementById('notif-email').value = settings.email || '';
         document.getElementById('notif-details').classList.toggle('d-none', !settings.enabled);
+
+        document.getElementById('notif-enabled-side').checked = settings.enabled;
+        document.getElementById('notif-email-side').value = settings.email || '';
+        document.getElementById('notif-details-side').classList.toggle('d-none', !settings.enabled);
       }
     }).getNotifSettings();
   }
@@ -2273,6 +2402,7 @@
     loadWorkingState();
     updateActiveDraftBadge();
     loadNotifSettings();
+    loadKPISettings();
     setInterval(() => { persistWorkingState(false); }, 7000);
     toggle('reg');
   }

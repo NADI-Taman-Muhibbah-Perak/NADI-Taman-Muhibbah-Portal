@@ -486,6 +486,22 @@ function deleteDraftFromDrive(draftId) {
 
 // --- SECTION: Automation & Notifications ---
 
+function getKPISettings() {
+  const props = PropertiesService.getScriptProperties();
+  return {
+    monthlyTarget: parseInt(props.getProperty('kpi_monthly_target') || '1', 10),
+    quarterlyTarget: parseInt(props.getProperty('kpi_quarterly_target') || '3', 10)
+  };
+}
+
+function saveKPISettings(data) {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty('kpi_monthly_target', String(data.monthlyTarget || 1));
+  props.setProperty('kpi_quarterly_target', String(data.quarterlyTarget || 3));
+  invalidateStatsCache();
+  return { status: 'SUCCESS' };
+}
+
 function getNotifSettings() {
   return cacheJson('notif_v1', () => {
     const props = PropertiesService.getScriptProperties();
