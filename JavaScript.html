@@ -2322,12 +2322,13 @@
       if (ref) {
         document.getElementById('sc-reference').classList.remove('d-none');
         document.getElementById('sc-ref-content').innerHTML = `
-          <div class="col-6">Date: <b>${ref.date}</b></div>
-          <div class="col-6">BMI: <b>${ref.bmi} (${ref.category})</b></div>
-          <div class="col-6">BP: <b>${ref.systolic}/${ref.diastolic}</b></div>
-          <div class="col-6">Pulse: <b>${ref.pulse || '-'}</b></div>
-          <div class="col-6">Glucose: <b>${ref.glucose}</b></div>
-          <div class="col-12 text-truncate">Remarks: <i>${ref.remarks || '-'}</i></div>
+          <div class="col-6 mb-2">Date: <b>${ref.date}</b></div>
+          <div class="col-6 mb-2 text-end">BMI: <b>${ref.bmi} (${ref.category})</b></div>
+          <div class="col-6 mb-2">HT: <b>${ref.height} cm</b> | WT: <b>${ref.weight} kg</b></div>
+          <div class="col-6 mb-2 text-end">Pulse: <b>${ref.pulse || '-'}</b></div>
+          <div class="col-6 mb-2">BP: <b>${ref.systolic}/${ref.diastolic}</b></div>
+          <div class="col-6 mb-2 text-end">Glucose: <b>${ref.glucose}</b></div>
+          <div class="col-12 text-truncate opacity-75 mt-1 border-top pt-2">Remarks: <i>${ref.remarks || '-'}</i></div>
         `;
       }
     }).getLatestScreening(name);
@@ -2352,32 +2353,56 @@
     const sysData = history.map(h => parseFloat(h.systolic) || null);
     const diaData = history.map(h => parseFloat(h.diastolic) || null);
 
-    const theme = document.documentElement.getAttribute('data-theme');
-    const textColor = theme === 'dark' ? '#f1f5f9' : '#1e293b';
+    const textColor = '#1e293b'; // Always dark text for Trend Chart title and axes as requested
+    const gridColor = 'rgba(0,0,0,0.05)';
 
     healthTrendChartInstance = new Chart(ctx, {
       type: 'line',
       data: {
         labels: labels,
         datasets: [
-          { label: 'BMI', data: bmiData, borderColor: '#0ea5e9', tension: 0.3, yAxisID: 'y' },
-          { label: 'Systolic', data: sysData, borderColor: '#ef4444', tension: 0.3, yAxisID: 'y1' },
-          { label: 'Diastolic', data: diaData, borderColor: '#f59e0b', tension: 0.3, yAxisID: 'y1' }
+          {
+            label: 'BMI', data: bmiData, borderColor: '#0ea5e9',
+            backgroundColor: 'rgba(14, 165, 233, 0.1)', fill: true,
+            tension: 0.4, yAxisID: 'y', pointRadius: 4, pointHoverRadius: 6,
+            borderWidth: 3, shadowBlur: 10, shadowColor: '#0ea5e9'
+          },
+          {
+            label: 'Systolic', data: sysData, borderColor: '#f43f5e',
+            backgroundColor: 'rgba(244, 63, 94, 0.05)', fill: true,
+            tension: 0.4, yAxisID: 'y1', pointRadius: 4, pointHoverRadius: 6,
+            borderWidth: 2, shadowBlur: 8, shadowColor: '#f43f5e'
+          },
+          {
+            label: 'Diastolic', data: diaData, borderColor: '#f59e0b',
+            backgroundColor: 'rgba(245, 158, 11, 0.05)', fill: true,
+            tension: 0.4, yAxisID: 'y1', pointRadius: 4, pointHoverRadius: 6,
+            borderWidth: 2, shadowBlur: 8, shadowColor: '#f59e0b'
+          }
         ]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: textColor, font: { size: 10 } } } },
+        plugins: {
+          legend: { labels: { color: textColor, font: { size: 11, weight: '600' }, usePointStyle: true, boxWidth: 6 } }
+        },
         scales: {
-          x: { ticks: { color: textColor, font: { size: 9 } } },
+          x: {
+            ticks: { color: textColor, font: { size: 10 } },
+            grid: { display: false }
+          },
           y: {
-            type: 'linear', display: true, position: 'left', title: { display: true, text: 'BMI', color: textColor },
-            ticks: { color: textColor }
+            type: 'linear', display: true, position: 'left',
+            title: { display: true, text: 'BMI', color: textColor, font: { weight: 'bold' } },
+            ticks: { color: textColor },
+            grid: { color: gridColor }
           },
           y1: {
-            type: 'linear', display: true, position: 'right', title: { display: true, text: 'BP (mmHg)', color: textColor },
-            ticks: { color: textColor }, grid: { drawOnChartArea: false }
+            type: 'linear', display: true, position: 'right',
+            title: { display: true, text: 'BP (mmHg)', color: textColor, font: { weight: 'bold' } },
+            ticks: { color: textColor },
+            grid: { drawOnChartArea: false }
           }
         }
       }
