@@ -42,8 +42,8 @@ function normalizeName_(value) {
   return String(value || '').toUpperCase().trim().replace(/\s+/g, ' ');
 }
 
-function getCompositeKey_(name, date, pillar, mod, sub) {
-  return `${normalizeName_(name)}|${formatDateStr(date)}|${normalizeName_(pillar)}|${normalizeName_(mod)}|${normalizeName_(sub)}`;
+function getCompositeKey_(name, date, time, pillar, mod, sub) {
+  return `${normalizeName_(name)}|${formatDateStr(date)}|${formatTimeStr(time)}|${normalizeName_(pillar)}|${normalizeName_(mod)}|${normalizeName_(sub)}`;
 }
 
 function getScriptUrl() {
@@ -154,6 +154,7 @@ function sheetHasProgram_(sheet, keyParts) {
   const targetKey = getCompositeKey_(
     keyParts.name,
     keyParts.date,
+    keyParts.time,
     keyParts.pillar,
     keyParts.module,
     keyParts.subModule
@@ -164,6 +165,7 @@ function sheetHasProgram_(sheet, keyParts) {
     const rowKey = getCompositeKey_(
       row[3], // Name
       row[1], // Date
+      row[2], // Time
       row[4], // Pillar
       row[5], // Module
       row[6]  // SubModule
@@ -673,7 +675,7 @@ function searchReportsGlobal(query) {
         status: 'COMPLETED',
         folderUrl: row[8] || '',
         picUrl: row[9] || '',
-        compositeKey: getCompositeKey_(row[3], d, p, row[5], row[6])
+        compositeKey: getCompositeKey_(row[3], d, row[2], p, row[5], row[6])
       });
     }
   });
@@ -715,7 +717,7 @@ function getDashboardStats() {
           status: 'COMPLETED',
           folderUrl: folderUrl,
           picUrl: picUrl,
-          compositeKey: getCompositeKey_(row[3], d, p, row[5], row[6])
+          compositeKey: getCompositeKey_(row[3], d, row[2], p, row[5], row[6])
         });
       }
     });
@@ -744,7 +746,7 @@ function getDashboardStats() {
           status: 'PLANNED',
           folderUrl: '',
           picUrl: '',
-          compositeKey: getCompositeKey_(row[3], pd, row[4], row[5], row[6])
+          compositeKey: getCompositeKey_(row[3], pd, row[2], row[4], row[5], row[6])
         });
       }
     }
@@ -852,6 +854,7 @@ function submitData(programs, participants, newMembers, updates, photosBySession
     const duplicateExists = sheetHasProgram_(pSheet, {
       name: prog.progName,
       date: prog.date,
+      time: prog.time,
       pillar: prog.pillar,
       module: prog.module,
       subModule: prog.subModule
@@ -915,17 +918,17 @@ function submitData(programs, participants, newMembers, updates, photosBySession
   return { status: 'SUCCESS', folderUrls: folderUrls, skipped: skipped, deletedDraft: deletedDraft };
 }
 
-function removePlanFromSheet(progName, dateStr, pillar, module, subModule) {
+function removePlanFromSheet(progName, dateStr, timeStr, pillar, module, subModule) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName('Planner');
   if (!sheet) return 'Error: No Planner Sheet';
 
-  const targetKey = getCompositeKey_(progName, dateStr, pillar, module, subModule);
+  const targetKey = getCompositeKey_(progName, dateStr, timeStr, pillar, module, subModule);
 
   const data = sheet.getDataRange().getValues();
   for (let i = data.length - 1; i >= 1; i--) {
     const row = data[i];
-    const rowKey = getCompositeKey_(row[3], row[1], row[4], row[5], row[6]);
+    const rowKey = getCompositeKey_(row[3], row[1], row[2], row[4], row[5], row[6]);
     if (rowKey === targetKey) {
       sheet.deleteRow(i + 1);
       invalidateStatsCache();
@@ -1031,6 +1034,7 @@ function updatePlanInSheet(oldKeyParts, newData) {
   const targetKey = getCompositeKey_(
     oldKeyParts.progName,
     oldKeyParts.date,
+    oldKeyParts.time,
     oldKeyParts.pillar,
     oldKeyParts.module,
     oldKeyParts.subModule
@@ -1039,7 +1043,7 @@ function updatePlanInSheet(oldKeyParts, newData) {
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    const rowKey = getCompositeKey_(row[3], row[1], row[4], row[5], row[6]);
+    const rowKey = getCompositeKey_(row[3], row[1], row[2], row[4], row[5], row[6]);
     if (rowKey === targetKey) {
       // Columns: 0: Timestamp, 1: Date, 2: Time, 3: Title, 4: Pillar, 5: Module, 6: SubModule, 7: PartName, 8: Remarks, 9: Link
       sheet.getRange(i + 1, 2).setValue(formatDateStr(newData.date));

@@ -1460,9 +1460,9 @@
                 ${p.link ? `<div class="small"><i class="fa-solid fa-link me-1 text-accent"></i><a href="${p.link}" target="_blank" class="text-accent text-decoration-none">Meeting Link</a></div>` : ''}
               </div>
               <div class="timeline-actions d-flex gap-1">
-                <button class="btn btn-sm btn-success rounded-circle shadow-sm" onclick="markDone('${jsStr(p.progName)}','${jsStr(p.date)}','${jsStr(p.pillar)}','${jsStr(p.module)}','${jsStr(p.sub)}')" title="Complete Session"><i class="fa-solid fa-check"></i></button>
+                <button class="btn btn-sm btn-success rounded-circle shadow-sm" onclick="markDone('${jsStr(p.progName)}','${jsStr(p.date)}','${jsStr(p.pillar)}','${jsStr(p.module)}','${jsStr(p.sub)}','${jsStr(p.time)}')" title="Complete Session"><i class="fa-solid fa-check"></i></button>
                 <button class="btn btn-sm btn-outline-primary rounded-circle shadow-sm" onclick="editPlan('${jsStr(p.progName)}','${jsStr(p.date)}','${jsStr(p.pillar)}','${jsStr(p.module)}','${jsStr(p.sub)}','${jsStr(p.time)}','${jsStr(p.remarks)}','${jsStr(p.link)}')" title="Edit Plan"><i class="fa-solid fa-pencil"></i></button>
-                <button class="btn btn-sm btn-light text-danger rounded-circle border shadow-sm" onclick="deletePlan('${jsStr(p.progName)}','${jsStr(p.date)}','${jsStr(p.pillar)}','${jsStr(p.module)}','${jsStr(p.sub)}')" title="Delete Plan"><i class="fa-solid fa-trash"></i></button>
+                <button class="btn btn-sm btn-light text-danger rounded-circle border shadow-sm" onclick="deletePlan('${jsStr(p.progName)}','${jsStr(p.date)}','${jsStr(p.pillar)}','${jsStr(p.module)}','${jsStr(p.sub)}','${jsStr(p.time)}')" title="Delete Plan"><i class="fa-solid fa-trash"></i></button>
               </div>
             </div>
             ${p.remarks ? `<div class="planner-remarks-box"><i class="fa-solid fa-note-sticky me-2 opacity-50"></i>${escapeHtml(p.remarks)}</div>` : ''}
@@ -1485,24 +1485,25 @@
           <div class="text-muted" style="font-size:.8rem;"><i class="fa-regular fa-calendar me-1"></i>${escapeHtml(p.date)}</div>
         </div>
         <div class="btn-group">
-          <button class="btn btn-sm btn-primary" onclick="markDone('${jsStr(p.progName)}','${jsStr(p.date)}','${jsStr(p.pillar)}','${jsStr(p.module)}','${jsStr(p.sub)}')">Fill Now</button>
+          <button class="btn btn-sm btn-primary" onclick="markDone('${jsStr(p.progName)}','${jsStr(p.date)}','${jsStr(p.pillar)}','${jsStr(p.module)}','${jsStr(p.sub)}','${jsStr(p.time)}')">Fill Now</button>
         </div>
       </div>`).join('');
     if (!plannerModalObj) plannerModalObj = new bootstrap.Modal(document.getElementById('plannerModal'));
     plannerModalObj.show();
   }
 
-  function markDone(name, date, pillar, mod, sub) {
+  function markDone(name, date, pillar, mod, sub, time) {
     toggle('reg');
     const latestCard = document.querySelector('#prog-container .nadi-card:last-child');
     if (latestCard) {
       latestCard.querySelector('.p-name').value = name;
       latestCard.querySelector('.p-date').value = (date.includes('-') && date.split('-')[0].length !== 4) ? date.split('-').reverse().join('-') : date;
+      latestCard.querySelector('.p-time').value = time || '';
       const pSel = latestCard.querySelector('.p-pillar'); pSel.value = pillar; updM(pSel);
       const mSel = latestCard.querySelector('.p-mod'); mSel.value = mod; updS(mSel);
       latestCard.querySelector('.p-sub').value = sub;
     }
-    deletePlan(name, date, pillar, mod, sub);
+    deletePlan(name, date, pillar, mod, sub, time);
     if (plannerModalObj) plannerModalObj.hide();
     persistWorkingState(false);
   }
@@ -1523,20 +1524,20 @@
       latestCard.querySelector('.p-sub').value = sub;
       latestCard.querySelector('.p-remarks').value = remarks || '';
       latestCard.querySelector('.p-link').value = link || '';
-      latestCard.querySelector('.p-old-key').value = JSON.stringify({ progName: name, date, pillar, module: mod, subModule: sub });
+      latestCard.querySelector('.p-old-key').value = JSON.stringify({ progName: name, date, time, pillar, module: mod, subModule: sub });
       latestCard.querySelector('.acc-title').innerText = name || 'Edit Plan';
     }
     persistWorkingState(false);
   }
 
-  function deletePlan(name, date, pillar, mod, sub) {
+  function deletePlan(name, date, pillar, mod, sub, time) {
     if(!confirm(`Delete planned program: ${name}?`)) return;
     google.script.run.withFailureHandler(handleApiError).withSuccessHandler(res => {
       if (res === 'DELETED') {
         showToast('Plan deleted');
         fetchPlannerData();
       }
-    }).removePlanFromSheet(name, date, pillar, mod, sub);
+    }).removePlanFromSheet(name, date, time, pillar, mod, sub);
   }
 
   // --- Dashboard & Stats ---
