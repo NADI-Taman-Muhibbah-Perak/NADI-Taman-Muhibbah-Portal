@@ -173,6 +173,45 @@ function sheetHasProgram_(sheet, keyParts) {
   return false;
 }
 
+function getProgramSessionInfo_(sheet, keyParts) {
+  if (!sheet) return null;
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return null;
+
+  const targetKey = getCompositeKey_(
+    keyParts.name,
+    keyParts.date,
+    keyParts.pillar,
+    keyParts.module,
+    keyParts.subModule
+  );
+
+  const rows = [];
+  const participants = new Set();
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const rowKey = getCompositeKey_(
+      row[3], // Name
+      row[1], // Date
+      row[4], // Pillar
+      row[5], // Module
+      row[6]  // SubModule
+    );
+    if (rowKey === targetKey) {
+      rows.push(i + 1);
+      if (row[7]) participants.add(normalizeName_(row[7]));
+    }
+  }
+
+  if (rows.length === 0) return null;
+
+  return {
+    rows: rows,
+    participants: Array.from(participants)
+  };
+}
+
 // --- SECTION: Members ---
 
 function getMemberData() {
@@ -760,15 +799,25 @@ function processUploadsAsArray(photoData, pillar, module, date, progName) {
   const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const monthStr = `${months[d.getMonth()]} ${d.getFullYear()}`;
 
-  // New Hierarchy: Pillar > Module > Month Year > Program Name > Session Date
+  // Unified Hierarchy: Pillar > Module > Month Year > Program Name
   const pillarFolder = getSubFolder(root, pillar);
   const moduleFolder = getSubFolder(pillarFolder, module);
   const monthFolder = getSubFolder(moduleFolder, monthStr);
-  const programFolder = getSubFolder(monthFolder, String(progName || 'Untitled').toUpperCase().trim());
-  const displayDate = formatDateStr(date);
+  const targetFolder = getSubFolder(monthFolder, String(progName || 'Untitled').toUpperCase().trim());
 
-  // Logic: Only Wellbeing uses 5 levels (includes Session Date). Others use 4 levels (up to Program Name).
-  const targetFolder = (pillar === 'Wellbeing') ? getSubFolder(programFolder, displayDate) : programFolder;
+  const displayDate = formatDateStr(date);
+  const normalizedProgName = String(progName || 'Untitled').toUpperCase().trim();
+  const filePrefix = `NADI Taman Muhibbah, Perak - ${displayDate} - ${normalizedProgName}`;
+
+  // Count existing photos for this specific date and program to continue numbering
+  let existingCount = 0;
+  const files = targetFolder.getFiles();
+  while (files.hasNext()) {
+    const file = files.next();
+    if (file.getName().startsWith(filePrefix)) {
+      existingCount++;
+    }
+  }
 
   const links = (photoData || []).map((file, index) => {
     const base64 = String(file.base64 || '');
@@ -777,7 +826,7 @@ function processUploadsAsArray(photoData, pillar, module, date, progName) {
     const bytes = Utilities.base64Decode(parts[1]);
     const mime = base64.split(';')[0].split(':')[1] || 'image/jpeg';
     const blob = Utilities.newBlob(bytes, mime);
-    blob.setName(`NADI Taman Muhibbah, Perak - ${displayDate} - ${progName} (${index + 1})`);
+    blob.setName(`${filePrefix} (${existingCount + index + 1})`);
     return targetFolder.createFile(blob).getUrl();
   }).filter(Boolean);
 
@@ -849,7 +898,7 @@ function submitData(programs, participants, newMembers, updates, photosBySession
     const targetSheetName = isPlanned ? 'Planner' : prog.pillar;
     const pSheet = ss.getSheetByName(targetSheetName) || ss.insertSheet(targetSheetName);
 
-    const duplicateExists = sheetHasProgram_(pSheet, {
+    const sessionInfo = getProgramSessionInfo_(pSheet, {
       name: prog.progName,
       date: prog.date,
       pillar: prog.pillar,
@@ -857,8 +906,9 @@ function submitData(programs, participants, newMembers, updates, photosBySession
       subModule: prog.subModule
     });
 
-    if (duplicateExists) {
-      skipped.push({ type: 'program', name: prog.progName, date: formatDateStr(prog.date), reason: 'Duplicate program entry' });
+    // If it's a planned program, we still use sheetHasProgram logic or just block if sessionInfo exists
+    if (isPlanned && sessionInfo) {
+      skipped.push({ type: 'program', name: prog.progName, date: formatDateStr(prog.date), reason: 'Duplicate planner entry' });
       return;
     }
 
@@ -870,35 +920,89 @@ function submitData(programs, participants, newMembers, updates, photosBySession
       folderUrls.push({ name: prog.progName, url: uploadResult.folderUrl });
     }
 
-    const rowBase = [
-      formatDateStr(new Date()),
-      formatDateStr(prog.date),
-      prog.time || '',
-      String(prog.progName || '').toUpperCase().trim(),
-      prog.pillar || '',
-      prog.module || '',
-      prog.subModule || '',
-      '',
-      '',
-      '', '', '', '', ''
-    ];
+    if (sessionInfo && !isPlanned) {
+      // MERGE LOGIC: Session already exists, append new participants and update photos
+      const existingParticipants = sessionInfo.participants;
+      const newParticipants = uniqueParticipants.filter(p => !existingParticipants.includes(normalizeName_(p.name)));
 
-    const loopData = isPlanned ? [{ name: 'PLANNER_RESERVED' }] : uniqueParticipants;
-    loopData.forEach((p, index) => {
-      const rowData = rowBase.slice();
-      rowData[7] = p.name || '';
+      if (newParticipants.length === 0 && uploadResult.links.length === 0) {
+        skipped.push({ type: 'program', name: prog.progName, date: formatDateStr(prog.date), reason: 'No new data to append' });
+        return;
+      }
 
-      if (isPlanned) {
-        rowData[8] = prog.remarks || '';
-        rowData[9] = prog.link || '';
-      } else if (index === 0) {
-        rowData[8] = uploadResult.folderUrl || '';
+      // 1. Update photos in the first row of the existing session
+      if (uploadResult.links.length > 0) {
+        const firstRowIndex = sessionInfo.rows[0];
+        // Photos start at index 9 in row array, which is Column 10 in Sheet
+        const currentPhotos = pSheet.getRange(firstRowIndex, 10, 1, 5).getValues()[0];
+        let updated = false;
+        let linkIdx = 0;
+
         for (let i = 0; i < 5; i++) {
-          rowData[9 + i] = uploadResult.links[i] || '';
+          if (!currentPhotos[i] && linkIdx < uploadResult.links.length) {
+            currentPhotos[i] = uploadResult.links[linkIdx++];
+            updated = true;
+          }
+        }
+
+        if (updated) {
+          pSheet.getRange(firstRowIndex, 10, 1, 5).setValues([currentPhotos]);
         }
       }
-      pSheet.appendRow(rowData);
-    });
+
+      // 2. Append new participants
+      if (newParticipants.length > 0) {
+        const rowBase = [
+          formatDateStr(new Date()),
+          formatDateStr(prog.date),
+          prog.time || '',
+          String(prog.progName || '').toUpperCase().trim(),
+          prog.pillar || '',
+          prog.module || '',
+          prog.subModule || '',
+          '', // Name (placeholder)
+          '', // Folder URL
+          '', '', '', '', '' // Photo 1-5
+        ];
+
+        newParticipants.forEach(p => {
+          const rowData = rowBase.slice();
+          rowData[7] = p.name || '';
+          pSheet.appendRow(rowData);
+        });
+      }
+    } else {
+      // NEW ENTRY LOGIC (or Planned entry)
+      const rowBase = [
+        formatDateStr(new Date()),
+        formatDateStr(prog.date),
+        prog.time || '',
+        String(prog.progName || '').toUpperCase().trim(),
+        prog.pillar || '',
+        prog.module || '',
+        prog.subModule || '',
+        '',
+        '',
+        '', '', '', '', ''
+      ];
+
+      const loopData = isPlanned ? [{ name: 'PLANNER_RESERVED' }] : uniqueParticipants;
+      loopData.forEach((p, index) => {
+        const rowData = rowBase.slice();
+        rowData[7] = p.name || '';
+
+        if (isPlanned) {
+          rowData[8] = prog.remarks || '';
+          rowData[9] = prog.link || '';
+        } else if (index === 0) {
+          rowData[8] = uploadResult.folderUrl || '';
+          for (let i = 0; i < 5; i++) {
+            rowData[9 + i] = uploadResult.links[i] || '';
+          }
+        }
+        pSheet.appendRow(rowData);
+      });
+    }
   });
 
   invalidateMemberCache();
